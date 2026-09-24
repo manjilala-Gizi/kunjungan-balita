@@ -1,6 +1,6 @@
 /* Service worker: simpan semua file aplikasi agar bisa dipakai offline */
-var CACHE = 'kunjungan-balita-v1.0.0';
-var FILES = ['./', './index.html', './app.js', './gizi.js', './who-lms.js', './rekap.js', './exceljs.min.js', './jszip.min.js',
+var CACHE = 'kunjungan-balita-v1.1.0';
+var FILES = ['./', './index.html', './app.js', './sync.js', './gizi.js', './who-lms.js', './rekap.js', './exceljs.min.js', './jszip.min.js',
   './manifest.webmanifest', './icon-192.png', './icon-512.png', './icon-maskable.png', './apple-touch-icon.png', './logo-poltekkes.png'];
 self.addEventListener('install', function (e) {
   e.waitUntil(caches.open(CACHE).then(function (c) { return c.addAll(FILES); }).then(function () { return self.skipWaiting(); }));

@@ -1,6 +1,6 @@
 /* Kunjungan Balita Moncongloe — aplikasi offline (PWA) */
 'use strict';
-var APP_VERSION = '1.0.0';
+var APP_VERSION = '1.1.0';
 GIZI.init(WHO_LMS);
 
 /* ================= Master data ================= */
@@ -82,16 +82,36 @@ var DB = {
   putMany: function (store, arr) { return DB.tx(store, 'readwrite', function (s) { arr.forEach(function (o) { s.put(o); }); }); }
 };
 
-var S = { balita: [], kunjungan: [], settings: { key: 'settings', puskesmas: 'MONCONGLOE', petugas: '', nip: '', lastBackup: null }, filter: { q: '', desa: '', pos: '', belum: false } };
+var S = { balita: [], kunjungan: [], tomb: [], settings: { key: 'settings', puskesmas: 'MONCONGLOE', petugas: '', nip: '', lastBackup: null }, filter: { q: '', desa: '', pos: '', belum: false } };
 
 function loadAll() {
   return Promise.all([DB.all('balita'), DB.all('kunjungan'), DB.get('meta', 'settings')]).then(function (r) {
-    S.balita = r[0] || []; S.kunjungan = r[1] || [];
+    S.tomb = [];
+    S.balita = (r[0] || []).filter(function (o) { if (o.deleted) { S.tomb.push({ store: 'balita', rec: o }); return false; } return true; });
+    S.kunjungan = (r[1] || []).filter(function (o) { if (o.deleted) { S.tomb.push({ store: 'kunjungan', rec: o }); return false; } return true; });
     if (r[2]) S.settings = Object.assign(S.settings, r[2]);
     try { var f = JSON.parse(localStorage.getItem('kb-filter') || 'null'); if (f) S.filter = Object.assign(S.filter, f, { q: '' }); } catch (e) { }
   });
 }
 function saveSettings() { return DB.put('meta', S.settings); }
+/* Simpan rekaman + tandai belum terkirim (untuk sinkron) */
+function applyMem(store, o) {
+  var arr = store === 'balita' ? 'balita' : 'kunjungan';
+  S[arr] = S[arr].filter(function (x) { return x.id !== o.id; });
+  S.tomb = S.tomb.filter(function (t) { return !(t.store === store && t.rec.id === o.id); });
+  if (o.deleted) S.tomb.push({ store: store, rec: o }); else S[arr].push(o);
+}
+function putRec(store, o) {
+  o._dirty = 1;
+  return DB.put(store, o).then(function () { applyMem(store, o); if (window.SYNC) SYNC.soon(); });
+}
+function hapusRec(store, o) {
+  var t = Object.assign({}, o, { deleted: true, updatedAt: Date.now() });
+  return putRec(store, t);
+}
+function allRecs(store) {
+  return (store === 'balita' ? S.balita : S.kunjungan).concat(S.tomb.filter(function (t) { return t.store === store; }).map(function (t) { return t.rec; }));
+}
 function balitaById(id) { for (var i = 0; i < S.balita.length; i++) if (S.balita[i].id === id) return S.balita[i]; return null; }
 function kunjunganById(id) { for (var i = 0; i < S.kunjungan.length; i++) if (S.kunjungan[i].id === id) return S.kunjungan[i]; return null; }
 function kunjunganOf(bid) { return S.kunjungan.filter(function (k) { return k.balitaId === bid; }).sort(function (a, b) { return a.tgl < b.tgl ? 1 : a.tgl > b.tgl ? -1 : (a.createdAt < b.createdAt ? 1 : -1); }); }
@@ -186,7 +206,7 @@ function vBeranda() {
   var dikunjungi = Object.keys(bulanIni).length;
   var cnt = { stunting: 0, wasting: 0, underweight: 0 };
   Object.keys(bulanIni).forEach(function (bid) {
-    var b = balitaById(bid), r = hasil(b, bulanIni[bid]);
+    var b = balitaById(bid); if (!b) return; var r = hasil(b, bulanIni[bid]);
     if (r.zTBU != null && r.zTBU < -2) cnt.stunting++;
     if (r.zBBTB != null && r.zBBTB < -2) cnt.wasting++;
     if (r.zBBU != null && r.zBBU < -2) cnt.underweight++;
@@ -361,9 +381,9 @@ function vFormBalita(id) {
     go.then(function (y) {
       if (!y) return;
       if (warns.length) toast(warns[0]);
-      DB.put('balita', o).then(function () {
-        if (id) { S.balita = S.balita.map(function (x) { return x.id === o.id ? o : x; }); toast('Data induk tersimpan'); location.hash = '#/balita/' + o.id; }
-        else { S.balita.push(o); toast('Balita tersimpan. Lanjut isi kunjungan.'); location.replace('#/kunjungan/baru/' + o.id); }
+      putRec('balita', o).then(function () {
+        if (id) { toast('Data induk tersimpan'); location.hash = '#/balita/' + o.id; }
+        else { toast('Balita tersimpan. Lanjut isi kunjungan.'); location.replace('#/kunjungan/baru/' + o.id); }
       });
     });
   });
@@ -416,8 +436,7 @@ function vDetail(id) {
   $('#btnHapusB').onclick = function () {
     modal({ title: 'Hapus ' + b.nama + '?', text: 'Data induk dan ' + ks.length + ' kunjungan akan dihapus dari HP ini. Tindakan ini tidak bisa dibatalkan.', ok: 'Hapus', danger: true }).then(function (y) {
       if (!y) return;
-      Promise.all(ks.map(function (k) { return DB.del('kunjungan', k.id); }).concat([DB.del('balita', id)])).then(function () {
-        S.kunjungan = S.kunjungan.filter(function (k) { return k.balitaId !== id; }); S.balita = S.balita.filter(function (x) { return x.id !== id; });
+      Promise.all(ks.map(function (k) { return hapusRec('kunjungan', k); }).concat([hapusRec('balita', b)])).then(function () {
         toast('Balita dihapus'); location.hash = '#/balita';
       });
     });
@@ -547,7 +566,7 @@ function vFormKunjungan(balitaId, kid) {
   if (hb) hb.onclick = function () {
     modal({ title: 'Hapus kunjungan ' + dmy(k.tgl) + '?', text: 'Data kunjungan ini akan dihapus dari HP. Data induk balita tetap ada.', ok: 'Hapus', danger: true }).then(function (y) {
       if (!y) return;
-      DB.del('kunjungan', k.id).then(function () { S.kunjungan = S.kunjungan.filter(function (x) { return x.id !== k.id; }); toast('Kunjungan dihapus'); location.hash = '#/balita/' + b.id; });
+      hapusRec('kunjungan', k).then(function () { toast('Kunjungan dihapus'); location.hash = '#/balita/' + b.id; });
     });
   };
   fm.addEventListener('submit', function (e) {
@@ -570,9 +589,7 @@ function vFormKunjungan(balitaId, kid) {
     var go = same ? modal({ title: 'Sudah ada kunjungan bulan ini', text: b.nama + ' sudah punya kunjungan tanggal ' + dmy(same.tgl) + '. Rekap memakai kunjungan terakhir di bulan yang sama. Tetap simpan?', ok: 'Tetap simpan' }) : Promise.resolve(true);
     go.then(function (y) {
       if (!y) return;
-      DB.put('kunjungan', o).then(function () {
-        var i = S.kunjungan.findIndex(function (x) { return x.id === o.id; });
-        if (i >= 0) S.kunjungan[i] = o; else S.kunjungan.push(o);
+      putRec('kunjungan', o).then(function () {
         toast('Kunjungan tersimpan'); location.hash = '#/balita/' + b.id;
       });
     });
@@ -655,22 +672,24 @@ function vPengaturan() {
     field('Nama puskesmas', inp('puskesmas', st.puskesmas), { forId: 'puskesmas' }) +
     '<button class="btn primary" type="submit">Simpan pengaturan</button></form>' +
 
+    (window.SYNC ? SYNC.settingsHtml() : '') +
     '<div class="sect"><p class="sect-h"><b>Cadangan data</b></p>' +
-    '<p class="small" style="margin:0">Data tersimpan hanya di HP ini: ' + S.balita.length + ' balita, ' + S.kunjungan.length + ' kunjungan. ' +
+    '<p class="small" style="margin:0">Data di perangkat ini: ' + S.balita.length + ' balita, ' + S.kunjungan.length + ' kunjungan. ' +
     (hb ? 'Cadangan terakhir ' + esc(tglPanjang(hb.toISOString().slice(0, 10))) + '.' : '<b>Belum pernah dicadangkan.</b>') + '</p>' +
     '<p class="help" style="margin:0">Simpan file cadangan secara rutin (mis. seminggu sekali) ke Google Drive atau kirim ke WhatsApp sendiri. File yang sama dipakai untuk memindahkan data ke HP baru.</p>' +
-    '<div class="row"><button class="btn primary" id="btnBackup" type="button" style="flex:1">Simpan cadangan</button><label class="btn" style="flex:1" for="fileRestore">Pulihkan dari file</label><input type="file" id="fileRestore" accept=".json,application/json" hidden></div>' +
+    '<div class="btnrow"><button class="btn primary" id="btnBackup" type="button">Simpan cadangan</button><label class="btn" for="fileRestore">Pulihkan dari file</label><input type="file" id="fileRestore" accept=".json,application/json" hidden></div>' +
     '<p class="small muted" id="persistInfo" style="margin:0"></p></div>' +
 
     '<div class="sect"><p class="sect-h"><b>Tentang</b></p><p class="small" style="margin:0">Status gizi dihitung dengan WHO Child Growth Standards 2006 (tabel LMS per hari, sama dengan WHO Anthro) dan dikategorikan menurut Permenkes No. 2 Tahun 2020 tentang Standar Antropometri Anak. PB/TB dikoreksi ±0,7 cm bila cara ukur tidak sesuai umur.</p>' +
-    '<button class="btn danger" id="btnReset" type="button">Hapus semua data di HP ini</button></div>' + creditHtml() + '</div>';
+    '<button class="btn danger" id="btnReset" type="button">Hapus semua data di perangkat ini</button></div>' + creditHtml() + '</div>';
+  if (window.SYNC) SYNC.bindSettings();
   $('#fs').addEventListener('submit', function (e) {
     e.preventDefault();
     st.petugas = $('#petugas').value.trim(); st.nip = $('#nip').value.trim(); st.puskesmas = ($('#puskesmas').value.trim() || 'MONCONGLOE').toUpperCase();
     saveSettings().then(function () { toast('Pengaturan tersimpan'); });
   });
   $('#btnBackup').onclick = function () {
-    var data = { app: 'kunjungan-balita-moncongloe', versi: APP_VERSION, dibuat: new Date().toISOString(), settings: st, balita: S.balita, kunjungan: S.kunjungan };
+    var data = { app: 'kunjungan-balita-moncongloe', versi: APP_VERSION, dibuat: new Date().toISOString(), settings: st, balita: allRecs('balita'), kunjungan: allRecs('kunjungan') };
     var blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
     var name = 'cadangan-kunjungan-balita-' + today() + '.json';
     st.lastBackup = Date.now(); saveSettings();
@@ -697,23 +716,23 @@ function vPengaturan() {
         var ganti = res.mode === 'ganti';
         var mergeArr = function (cur, inc) {
           var m = {}; (ganti ? [] : cur).forEach(function (o) { m[o.id] = o; });
-          (inc || []).forEach(function (o) { if (!m[o.id] || (o.updatedAt || 0) >= (m[o.id].updatedAt || 0)) m[o.id] = o; });
+          (inc || []).forEach(function (o) { if (!m[o.id] || (o.updatedAt || 0) > (m[o.id].updatedAt || 0)) { o._dirty = 1; m[o.id] = o; } });
           return Object.keys(m).map(function (k) { return m[k]; });
         };
-        var nb = mergeArr(S.balita, d.balita), nk = mergeArr(S.kunjungan, d.kunjungan);
+        var nb = mergeArr(allRecs('balita'), d.balita), nk = mergeArr(allRecs('kunjungan'), d.kunjungan);
         var p = ganti ? Promise.all([DB.clear('balita'), DB.clear('kunjungan')]) : Promise.resolve();
         p.then(function () { return Promise.all([DB.putMany('balita', nb), DB.putMany('kunjungan', nk)]); }).then(function () {
           if (d.settings && (ganti || !st.petugas)) { ['petugas', 'nip', 'puskesmas'].forEach(function (x) { if (d.settings[x]) st[x] = d.settings[x]; }); saveSettings(); }
-          S.balita = nb; S.kunjungan = nk; toast('Data dipulihkan: ' + nb.length + ' balita, ' + nk.length + ' kunjungan'); vPengaturan();
+          loadAll().then(function () { toast('Data dipulihkan: ' + S.balita.length + ' balita, ' + S.kunjungan.length + ' kunjungan'); vPengaturan(); if (window.SYNC) SYNC.soon(); });
         });
       });
     });
     e.target.value = '';
   });
   $('#btnReset').onclick = function () {
-    modal({ title: 'Hapus semua data?', html: '<p class="small" style="margin:0 0 10px">Semua balita dan kunjungan di HP ini akan dihapus permanen. Simpan cadangan dulu jika masih diperlukan.</p>' + field('Ketik HAPUS untuk melanjutkan', '<input class="input" id="konf" autocomplete="off">', { forId: 'konf' }), ok: 'Hapus semua', danger: true, collect: function (root) { return { t: $('#konf', root).value.trim() }; } }).then(function (r) {
+    modal({ title: 'Hapus semua data?', html: '<p class="small" style="margin:0 0 10px">Semua balita dan kunjungan di perangkat ini akan dihapus. Simpan cadangan dulu jika masih diperlukan. Jika sinkron aktif, data di Google Sheet tidak ikut terhapus dan akan terunduh lagi.</p>' + field('Ketik HAPUS untuk melanjutkan', '<input class="input" id="konf" autocomplete="off">', { forId: 'konf' }), ok: 'Hapus semua', danger: true, collect: function (root) { return { t: $('#konf', root).value.trim() }; } }).then(function (r) {
       if (!r) return; if (r.t !== 'HAPUS') { toast('Dibatalkan: ketikan tidak sesuai.'); return; }
-      Promise.all([DB.clear('balita'), DB.clear('kunjungan')]).then(function () { S.balita = []; S.kunjungan = []; toast('Semua data dihapus'); vPengaturan(); });
+      Promise.all([DB.clear('balita'), DB.clear('kunjungan')]).then(function () { S.balita = []; S.kunjungan = []; S.tomb = []; if (window.SYNC) SYNC.resetPull(); toast('Semua data di perangkat ini dihapus'); vPengaturan(); });
     });
   };
   if (navigator.storage && navigator.storage.persisted) navigator.storage.persisted().then(function (p) { var el = $('#persistInfo'); if (el) el.textContent = p ? 'Penyimpanan permanen aktif: browser tidak akan menghapus data otomatis.' : 'Penyimpanan belum permanen. Pasang aplikasi ke layar utama agar data lebih aman.'; });
@@ -722,7 +741,7 @@ function vPengaturan() {
 /* ================= Data contoh (uji coba) ================= */
 function muatContoh() {
   var t = new Date(), ym = function (back, day) { var d = new Date(t.getFullYear(), t.getMonth() - back, day); return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); };
-  var mk = function (o) { return Object.assign({ id: uid(), createdAt: Date.now(), updatedAt: Date.now(), anakKe: '2', uk: 39, kategoriLahir: 'Cukup Bulan', bbl: 3000, pbl: 49, lkl: 33 }, o); };
+  var mk = function (o) { return Object.assign({ _dirty: 1, id: uid(), createdAt: Date.now(), updatedAt: Date.now(), anakKe: '2', uk: 39, kategoriLahir: 'Cukup Bulan', bbl: 3000, pbl: 49, lkl: 33 }, o); };
   var bs = [
     mk({ nama: 'Contoh Andi Saputra', jk: 'L', tglLahir: ym(28, 12), desa: 'MONCONGLOE BULU', posyandu: 'TAMMU-TAMMU', alamat: 'Tammu-tammu', nik: '', ayah: { nama: 'Contoh Rudi', pendidikan: 'SMA', pekerjaan: 'Wiraswasta/Pedagang', nik: '' }, ibu: { nama: 'Contoh Sari', pendidikan: 'SMP', pekerjaan: 'IRT', nik: '' } }),
     mk({ nama: 'Contoh Nur Aisyah', jk: 'P', tglLahir: ym(15, 3), desa: 'MONCONGLOE LAPPARA', posyandu: 'BALLAPATI', alamat: 'Blok C2/7', bbl: 2600, pbl: 47, ayah: { nama: 'Contoh Hasan', pendidikan: 'SD', pekerjaan: 'Buruh Harian', nik: '' }, ibu: { nama: 'Contoh Rahma', pendidikan: 'SMA', pekerjaan: 'IRT', nik: '' } }),
@@ -730,19 +749,20 @@ function muatContoh() {
   ];
   var base = { asiEks: 'Ya', asiLanjut: 'Ya', umurMpasi: 6, bpjs: 'Ya', airBersih: 'Ya', jamban: 'Ya', imunisasi: 'Ya, Lengkap', rokok: 'Ya', cacingan: 'Tidak', kek: 'Tidak KEK', penyakit: 'Tidak ada', mpasi: { asi: false, pokok: true, hewani: true, nabati: true, sayur: true, buah: true, telur: true } };
   var ks = [];
-  var add = function (b, back, day, bb, tb, cara, extra) { ks.push(Object.assign({}, base, { id: uid(), balitaId: b.id, tgl: ym(back, day), bb: bb, tb: tb, caraUkur: cara, lk: 47, lila: 14.5, kebiasaan: 'Makan 3x sehari (nasi, ikan, sayur bening). Suka jajan biskuit dan minuman kemasan. Jarang makan buah.', createdAt: Date.now() - back * 1e6, updatedAt: Date.now() - back * 1e6 }, extra || {})); };
+  var add = function (b, back, day, bb, tb, cara, extra) { ks.push(Object.assign({}, base, { _dirty: 1, id: uid(), balitaId: b.id, tgl: ym(back, day), bb: bb, tb: tb, caraUkur: cara, lk: 47, lila: 14.5, kebiasaan: 'Makan 3x sehari (nasi, ikan, sayur bening). Suka jajan biskuit dan minuman kemasan. Jarang makan buah.', createdAt: Date.now() - back * 1e6, updatedAt: Date.now() - back * 1e6 }, extra || {})); };
   add(bs[0], 2, 10, 10.6, 84.9, 'berdiri'); add(bs[0], 1, 11, 10.8, 85.6, 'berdiri'); add(bs[0], 0, 1, 11.0, 86.2, 'berdiri');
   add(bs[1], 2, 12, 7.6, 72.0, 'terlentang', { mpasi: { asi: true, pokok: true, hewani: false, nabati: true, sayur: true, buah: false, telur: true } });
   add(bs[1], 0, 1, 7.9, 73.4, 'terlentang', { mpasi: { asi: true, pokok: true, hewani: false, nabati: true, sayur: true, buah: false, telur: true }, penyakit: 'Demam, batuk' });
   add(bs[2], 1, 13, 10.9, 88.0, 'berdiri', { kek: 'KEK', rokok: 'Tidak', imunisasi: 'Ya, Tidak Lengkap' }); add(bs[2], 0, 1, 11.1, 88.6, 'berdiri', { kek: 'KEK', rokok: 'Tidak', imunisasi: 'Ya, Tidak Lengkap' });
-  Promise.all([DB.putMany('balita', bs), DB.putMany('kunjungan', ks)]).then(function () { S.balita = S.balita.concat(bs); S.kunjungan = S.kunjungan.concat(ks); toast('Data contoh dimuat (3 balita)'); vBeranda(); });
+  Promise.all([DB.putMany('balita', bs), DB.putMany('kunjungan', ks)]).then(function () { S.balita = S.balita.concat(bs); S.kunjungan = S.kunjungan.concat(ks); toast('Data contoh dimuat (3 balita)'); vBeranda(); if (window.SYNC) SYNC.soon(); });
 }
 
 /* ================= Start ================= */
-function onlineState() { $('#offline').hidden = navigator.onLine; }
+function onlineState() { if (window.SYNC) SYNC.badge(); else $('#offline').hidden = navigator.onLine; }
 window.addEventListener('online', onlineState); window.addEventListener('offline', onlineState);
 DB.open().then(loadAll).then(function () {
   onlineState(); route();
+  if (window.SYNC) SYNC.start();
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(function () { });
 }).catch(function (e) {
   view.innerHTML = '<div class="warnbox bad">Penyimpanan HP tidak bisa dibuka (' + esc(e && e.message) + '). Pastikan tidak memakai mode penyamaran (incognito).</div>';

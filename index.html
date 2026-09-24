@@ -66,6 +66,8 @@ h2:first-child{margin-top:0}
 .btn.primary{background:var(--brand);border-color:var(--brand);color:var(--brand-ink)}
 .btn.danger{color:var(--bad);border-color:var(--bad)}
 .btn.block{width:100%}
+.btnrow{display:flex;flex-wrap:wrap;gap:10px}
+.btnrow>.btn{flex:1 1 150px;white-space:nowrap}
 .btn.sm{min-height:36px;padding:0 12px;font-size:14px}
 .btn:disabled{opacity:.45;cursor:not-allowed}
 .btn:focus-visible,.iconbtn:focus-visible,.seg label:focus-within,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid color-mix(in srgb,var(--brand) 45%,transparent);outline-offset:1px}
@@ -176,7 +178,7 @@ details.panel[open] summary{margin-bottom:12px}
 <header class="appbar">
   <button class="iconbtn" id="btnBack" type="button" aria-label="Kembali" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></button>
   <h1 id="title">Kunjungan Balita</h1>
-  <span id="offline" class="chip" hidden>Offline</span>
+  <span id="offline" class="chip" hidden></span>
 </header>
 <main id="view" aria-live="polite"></main>
 <nav class="nav" aria-label="Menu utama">
@@ -189,5 +191,6 @@ details.panel[open] summary{margin-bottom:12px}
 <script src="who-lms.js"></script>
 <script src="gizi.js"></script>
 <script src="app.js"></script>
+<script src="sync.js"></script>
 </body>
 </html>
