@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Kunjungan Balita Moncongloe</title>
+<meta name="description" content="Aplikasi offline pencatatan kunjungan lapangan balita dan rekap Excel per posyandu, Puskesmas Moncongloe.">
+<meta name="theme-color" content="#0F5B4F">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<style>
+:root{
+  --bg:#F3F6F5; --surface:#FFFFFF; --surface-2:#E9EFED; --ink:#15211E; --muted:#5B6B66; --line:#D5DFDB;
+  --brand:#0F5B4F; --brand-ink:#FFFFFF; --brand-soft:#DCEDE8; --accent:#C9861A;
+  --ok:#1D7A4C; --ok-soft:#DDF1E6; --warn:#A6570B; --warn-soft:#FBEBD6; --bad:#B42318; --bad-soft:#FBE1DE; --info:#2358A6; --info-soft:#DFE9F8;
+  --radius:12px; --shadow:0 1px 2px rgba(16,40,34,.06),0 2px 8px rgba(16,40,34,.06);
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#0F1614; --surface:#17211E; --surface-2:#1F2B28; --ink:#E6EEEB; --muted:#9DB0AA; --line:#2C3A36;
+    --brand:#3FA98F; --brand-ink:#08201A; --brand-soft:#1B3730; --accent:#E3A43B;
+    --ok:#5CCB93; --ok-soft:#173327; --warn:#F0A65A; --warn-soft:#3A2A16; --bad:#F2877D; --bad-soft:#3D1D1A; --info:#8AB4F2; --info-soft:#1B2A40;
+    --shadow:none; color-scheme:dark;
+  }
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans",sans-serif;-webkit-tap-highlight-color:transparent}
+button,input,select,textarea{font:inherit;color:inherit}
+[hidden]{display:none!important}
+.num{font-variant-numeric:tabular-nums}
+
+/* Kerangka */
+.appbar{position:sticky;top:0;z-index:20;background:var(--brand);color:var(--brand-ink);padding:calc(env(safe-area-inset-top,0px) + 10px) 16px 10px;display:flex;align-items:center;gap:10px;min-height:56px}
+.appbar h1{font-size:17px;margin:0;font-weight:650;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.appbar .sub{display:block;font-size:12px;font-weight:400;opacity:.85}
+.iconbtn{background:transparent;border:0;color:inherit;width:40px;height:40px;border-radius:20px;display:grid;place-items:center;cursor:pointer;flex:none}
+.iconbtn:active{background:rgba(255,255,255,.15)}
+.iconbtn svg{width:22px;height:22px}
+main{padding:16px 16px calc(96px + env(safe-area-inset-bottom,0px));max-width:760px;margin:0 auto}
+.nav{position:fixed;left:0;right:0;bottom:0;z-index:30;background:var(--surface);border-top:1px solid var(--line);display:grid;grid-template-columns:repeat(4,1fr);padding-bottom:env(safe-area-inset-bottom,0px)}
+.nav a{display:flex;flex-direction:column;align-items:center;gap:2px;padding:8px 0 10px;color:var(--muted);text-decoration:none;font-size:12px}
+.nav a svg{width:24px;height:24px}
+.nav a.on{color:var(--brand);font-weight:600}
+.stack{display:flex;flex-direction:column;gap:12px}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.spacer{flex:1}
+h2{font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:18px 0 8px;font-weight:650}
+h2:first-child{margin-top:0}
+.muted{color:var(--muted)}
+.small{font-size:13px}
+
+/* Panel */
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:14px}
+.panel.flat{box-shadow:none}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.stat{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:12px}
+.stat b{display:block;font-size:24px;line-height:1.1;font-variant-numeric:tabular-nums}
+.stat span{font-size:12px;color:var(--muted)}
+
+/* Tombol */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:0 16px;border-radius:10px;border:1px solid var(--line);background:var(--surface);cursor:pointer;font-weight:600;text-decoration:none;color:var(--ink)}
+.btn svg{width:18px;height:18px}
+.btn.primary{background:var(--brand);border-color:var(--brand);color:var(--brand-ink)}
+.btn.danger{color:var(--bad);border-color:var(--bad)}
+.btn.block{width:100%}
+.btn.sm{min-height:36px;padding:0 12px;font-size:14px}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn:focus-visible,.iconbtn:focus-visible,.seg label:focus-within,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid color-mix(in srgb,var(--brand) 45%,transparent);outline-offset:1px}
+.fab{position:fixed;right:16px;bottom:calc(76px + env(safe-area-inset-bottom,0px));z-index:25;border-radius:28px;min-height:52px;padding:0 20px;box-shadow:0 4px 14px rgba(15,91,79,.35)}
+
+/* Formulir */
+form .sect{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:14px;display:flex;flex-direction:column;gap:14px}
+.sect-h{display:flex;align-items:baseline;gap:8px;margin:0}
+.sect-h b{font-size:15px}
+.sect-h .hint{font-size:12px;color:var(--muted)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media (max-width:420px){.grid2.stack-sm{grid-template-columns:1fr}}
+.field{display:flex;flex-direction:column;gap:6px;min-width:0}
+.field>label,.field>.lbl{font-size:13px;font-weight:600;color:var(--muted)}
+.field .req{color:var(--bad)}
+.input,select.input,textarea.input{width:100%;min-height:46px;border:1px solid var(--line);border-radius:10px;background:var(--bg);padding:10px 12px;font-size:16px}
+textarea.input{min-height:96px;resize:vertical}
+.input.err{border-color:var(--bad);background:var(--bad-soft)}
+.unit{position:relative}
+.unit .input{padding-right:52px}
+.unit span{position:absolute;right:12px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:14px;pointer-events:none}
+.help{font-size:12px;color:var(--muted)}
+.help.err{color:var(--bad)}
+.seg{display:flex;flex-wrap:wrap;gap:6px}
+.seg label{position:relative;display:inline-flex;align-items:center;min-height:42px;padding:0 14px;border:1px solid var(--line);border-radius:22px;background:var(--bg);cursor:pointer;font-size:15px;user-select:none}
+.seg input{position:absolute;opacity:0;pointer-events:none}
+.seg label:has(input:checked){background:var(--brand);border-color:var(--brand);color:var(--brand-ink);font-weight:600}
+.seg.check label:has(input:checked)::before{content:"✓";margin-right:6px}
+.qchips{display:flex;flex-wrap:wrap;gap:6px}
+.qchips button{border:1px dashed var(--line);background:transparent;border-radius:16px;padding:4px 10px;font-size:13px;cursor:pointer;color:var(--muted)}
+.savebar{position:sticky;bottom:calc(64px + env(safe-area-inset-bottom,0px));z-index:15;background:linear-gradient(to top,var(--bg) 70%,transparent);padding:12px 0 4px;display:flex;gap:10px}
+.savebar .btn{flex:1}
+
+/* Status gizi */
+.chip{display:inline-flex;align-items:center;gap:4px;border-radius:14px;padding:2px 9px;font-size:12.5px;font-weight:600;white-space:nowrap;background:var(--surface-2);color:var(--muted)}
+.chip.ok{background:var(--ok-soft);color:var(--ok)}
+.chip.warn{background:var(--warn-soft);color:var(--warn)}
+.chip.bad{background:var(--bad-soft);color:var(--bad)}
+.chip.info{background:var(--info-soft);color:var(--info)}
+.zpanel{border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);overflow:hidden}
+.zpanel .zh{padding:10px 14px;background:var(--brand-soft);display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+.zpanel .zh b{font-size:14px}
+.ztable{width:100%;border-collapse:collapse}
+.ztable td{padding:9px 14px;border-top:1px solid var(--line);vertical-align:middle}
+.ztable td:nth-child(2){text-align:right;font-variant-numeric:tabular-nums;width:72px;color:var(--muted)}
+.ztable td:last-child{text-align:right;width:1%;white-space:nowrap}
+.warnbox{border-radius:10px;padding:10px 12px;background:var(--warn-soft);color:var(--warn);font-size:13.5px}
+.warnbox.bad{background:var(--bad-soft);color:var(--bad)}
+.warnbox.info{background:var(--info-soft);color:var(--info)}
+.warnbox ul{margin:4px 0 0;padding-left:18px}
+
+/* Daftar */
+.search{position:sticky;top:56px;z-index:10;background:var(--bg);padding:0 0 10px;display:flex;flex-direction:column;gap:8px}
+.list{display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
+.item{display:flex;gap:12px;padding:12px 14px;border-top:1px solid var(--line);text-decoration:none;color:inherit;align-items:center}
+.item:first-child{border-top:0}
+.item:active{background:var(--surface-2)}
+.avatar{width:40px;height:40px;border-radius:20px;display:grid;place-items:center;font-weight:700;font-size:15px;flex:none;background:var(--brand-soft);color:var(--brand)}
+.avatar.p{background:#F6E3EC;color:#9A3A64}
+@media (prefers-color-scheme: dark){.avatar.p{background:#3A2030;color:#F0A8C8}}
+.item .main{flex:1;min-width:0}
+.item .t{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.item .s{font-size:13px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.item .chips{display:flex;gap:4px;flex-wrap:wrap;margin-top:4px}
+.done{font-size:11.5px;color:var(--ok);font-weight:700;white-space:nowrap}
+.empty{text-align:center;padding:28px 16px;color:var(--muted)}
+.empty b{display:block;color:var(--ink);font-size:16px;margin-bottom:4px}
+
+/* Detail */
+.kv{display:grid;grid-template-columns:minmax(110px,40%) 1fr;gap:6px 12px;font-size:14px}
+.kv dt{color:var(--muted)}
+.kv dd{margin:0;word-break:break-word}
+details.panel summary{cursor:pointer;font-weight:650;list-style:none;display:flex;align-items:center;gap:8px}
+details.panel summary::-webkit-details-marker{display:none}
+details.panel summary::after{content:"";margin-left:auto;width:9px;height:9px;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);transform:rotate(45deg);transition:transform .15s}
+details[open].panel summary::after{transform:rotate(-135deg)}
+details.panel[open] summary{margin-bottom:12px}
+.visit{padding:12px 14px;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:6px}
+.visit:first-child{border-top:0}
+.visit .top{display:flex;gap:8px;align-items:baseline}
+.visit .meas{font-size:13.5px;color:var(--muted)}
+.tbl-wrap{overflow-x:auto}
+.trend{width:100%;height:auto;display:block}
+
+/* Rekap */
+.desa{margin-top:6px}
+.pos{display:flex;align-items:center;gap:10px;padding:10px 14px;border-top:1px solid var(--line)}
+.pos:first-child{border-top:0}
+.pos .n{font-weight:600;flex:1;min-width:0}
+.badge{min-width:28px;height:24px;border-radius:12px;background:var(--brand-soft);color:var(--brand);display:inline-grid;place-items:center;font-size:13px;font-weight:700;padding:0 8px;font-variant-numeric:tabular-nums}
+.badge.zero{background:var(--surface-2);color:var(--muted)}
+
+/* Modal & toast */
+.modal{position:fixed;inset:0;z-index:50;background:rgba(10,20,18,.5);display:flex;align-items:flex-end;justify-content:center;padding:16px}
+.modal .box{background:var(--surface);border-radius:16px;padding:18px;width:100%;max-width:440px;display:flex;flex-direction:column;gap:12px;margin-bottom:env(safe-area-inset-bottom,0px)}
+.modal .box h3{margin:0;font-size:17px}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(84px + env(safe-area-inset-bottom,0px));z-index:60;background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;font-size:14px;max-width:calc(100% - 32px);box-shadow:0 4px 16px rgba(0,0,0,.2)}
+.banner{display:flex;gap:10px;align-items:center;background:var(--info-soft);color:var(--info);border-radius:10px;padding:10px 12px;font-size:13.5px}
+.banner .btn{min-height:34px}
+.credit{display:flex;flex-direction:column;align-items:center;gap:8px;padding:20px 8px 4px;text-align:center}
+.credit img{width:min(220px,70%);height:auto}
+.credit p{margin:0;font-size:12.5px;color:var(--muted)}
+.credit b{color:var(--ink)}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<header class="appbar">
+  <button class="iconbtn" id="btnBack" type="button" aria-label="Kembali" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></button>
+  <h1 id="title">Kunjungan Balita</h1>
+  <span id="offline" class="chip" hidden>Offline</span>
+</header>
+<main id="view" aria-live="polite"></main>
+<nav class="nav" aria-label="Menu utama">
+  <a href="#/beranda" data-nav="beranda"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-7 9 7v9a1 1 0 01-1 1h-5v-6H9v6H4a1 1 0 01-1-1z"/></svg>Beranda</a>
+  <a href="#/balita" data-nav="balita"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="7" r="3.5"/><path d="M5 21v-1.5A5.5 5.5 0 0110.5 14h3a5.5 5.5 0 015.5 5.5V21"/></svg>Balita</a>
+  <a href="#/rekap" data-nav="rekap"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>Rekap</a>
+  <a href="#/pengaturan" data-nav="pengaturan"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z"/></svg>Pengaturan</a>
+</nav>
+<div id="modalRoot"></div>
+<script src="who-lms.js"></script>
+<script src="gizi.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
