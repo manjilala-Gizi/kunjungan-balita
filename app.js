@@ -1,6 +1,6 @@
 /* Kunjungan Balita Moncongloe — aplikasi offline (PWA) */
 'use strict';
-var APP_VERSION = '1.2.0';
+var APP_VERSION = '1.3.0';
 GIZI.init(WHO_LMS);
 
 /* ================= Master data ================= */
@@ -53,13 +53,13 @@ var DB = {
   db: null,
   open: function () {
     return new Promise(function (res, rej) {
-      var r = indexedDB.open('kunjungan-balita-moncongloe', 1);
+      var r = indexedDB.open('kunjungan-balita-moncongloe', 2);
       r.onupgradeneeded = function () {
-        var d = r.result;
-        d.createObjectStore('balita', { keyPath: 'id' });
-        var k = d.createObjectStore('kunjungan', { keyPath: 'id' });
-        k.createIndex('balitaId', 'balitaId');
-        d.createObjectStore('meta', { keyPath: 'key' });
+        var d = r.result, ada = function (n) { return d.objectStoreNames.contains(n); };
+        if (!ada('balita')) d.createObjectStore('balita', { keyPath: 'id' });
+        if (!ada('kunjungan')) { var k = d.createObjectStore('kunjungan', { keyPath: 'id' }); k.createIndex('balitaId', 'balitaId'); }
+        if (!ada('meta')) d.createObjectStore('meta', { keyPath: 'key' });
+        if (!ada('laporan')) d.createObjectStore('laporan', { keyPath: 'id' });
       };
       r.onsuccess = function () { DB.db = r.result; res(); };
       r.onerror = function () { rej(r.error); };
@@ -82,10 +82,11 @@ var DB = {
   putMany: function (store, arr) { return DB.tx(store, 'readwrite', function (s) { arr.forEach(function (o) { s.put(o); }); }); }
 };
 
-var S = { balita: [], kunjungan: [], tomb: [], settings: { key: 'settings', puskesmas: 'MONCONGLOE', petugas: '', nip: '', lastBackup: null }, filter: { q: '', desa: '', pos: '', belum: false } };
+var S = { balita: [], kunjungan: [], laporan: [], tomb: [], settings: { key: 'settings', puskesmas: 'MONCONGLOE', petugas: '', nip: '', lastBackup: null }, filter: { q: '', desa: '', pos: '', belum: false } };
 
 function loadAll() {
-  return Promise.all([DB.all('balita'), DB.all('kunjungan'), DB.get('meta', 'settings')]).then(function (r) {
+  return Promise.all([DB.all('balita'), DB.all('kunjungan'), DB.get('meta', 'settings'), DB.all('laporan')]).then(function (r) {
+    S.laporan = (r[3] || []).filter(function (o) { return !o.deleted; });
     S.tomb = [];
     S.balita = (r[0] || []).filter(function (o) { if (o.deleted) { S.tomb.push({ store: 'balita', rec: o }); return false; } return true; });
     S.kunjungan = (r[1] || []).filter(function (o) { if (o.deleted) { S.tomb.push({ store: 'kunjungan', rec: o }); return false; } return true; });
@@ -96,7 +97,7 @@ function loadAll() {
 function saveSettings() { return DB.put('meta', S.settings); }
 /* Simpan rekaman + tandai belum terkirim (untuk sinkron) */
 function applyMem(store, o) {
-  var arr = store === 'balita' ? 'balita' : 'kunjungan';
+  var arr = store;
   S[arr] = S[arr].filter(function (x) { return x.id !== o.id; });
   S.tomb = S.tomb.filter(function (t) { return !(t.store === store && t.rec.id === o.id); });
   if (o.deleted) S.tomb.push({ store: store, rec: o }); else S[arr].push(o);
@@ -110,7 +111,7 @@ function hapusRec(store, o) {
   return putRec(store, t);
 }
 function allRecs(store) {
-  return (store === 'balita' ? S.balita : S.kunjungan).concat(S.tomb.filter(function (t) { return t.store === store; }).map(function (t) { return t.rec; }));
+  return (S[store] || []).concat(S.tomb.filter(function (t) { return t.store === store; }).map(function (t) { return t.rec; }));
 }
 function balitaById(id) { for (var i = 0; i < S.balita.length; i++) if (S.balita[i].id === id) return S.balita[i]; return null; }
 function kunjunganById(id) { for (var i = 0; i < S.kunjungan.length; i++) if (S.kunjungan[i].id === id) return S.kunjungan[i]; return null; }
@@ -191,6 +192,7 @@ function route() {
   if (p[0] === 'kunjungan' && p[1] === 'baru') return vFormKunjungan(p[2], null);
   if (p[0] === 'kunjungan' && p[2] === 'edit') return vFormKunjungan(null, p[1]);
   if (p[0] === 'rekap') return vRekap();
+  if (p[0] === 'laporan') return vLaporan();
   if (p[0] === 'pengaturan') return vPengaturan();
   location.hash = '#/beranda';
 }
@@ -671,6 +673,133 @@ function downloadBlob(blob, name) {
   toast('Tersimpan: ' + name, 3500);
 }
 
+
+/* ================= Laporan bulanan (Word) ================= */
+var docxLoaded = null;
+function loadDocx() {
+  if (docxLoaded) return docxLoaded;
+  docxLoaded = new Promise(function (res, rej) { var sc = document.createElement('script'); sc.src = 'docx.min.js'; sc.onload = res; sc.onerror = function () { docxLoaded = null; rej(new Error('Gagal memuat pembuat Word')); }; document.head.appendChild(sc); });
+  return docxLoaded;
+}
+function laporanOf(ym) { for (var i = 0; i < S.laporan.length; i++) if (S.laporan[i].ym === ym) return S.laporan[i]; return null; }
+function laporanTerakhirSebelum(ym) { return S.laporan.filter(function (l) { return l.ym < ym && ((l.petugas || []).length || l.pjNama); }).sort(function (a, b) { return a.ym < b.ym ? 1 : -1; })[0] || null; }
+function semuaPosyandu() { var a = []; WILAYAH.forEach(function (w) { a = a.concat(w[1]); }); return a; }
+
+function vLaporan() {
+  setNav('laporan'); setTitle('Laporan Bulanan', 'Laporan perjalanan dinas (Word)');
+  var ym = S.lapYm || thisMonth();
+  var ada = laporanOf(ym), lalu = laporanTerakhirSebelum(ym);
+  var st = LAPORAN.hitung(ym);
+  var f = ada ? JSON.parse(JSON.stringify(ada)) : {
+    id: 'lap-' + ym, ym: ym, noSurat: '', tglLaporan: today(),
+    pjNama: lalu ? lalu.pjNama : '', pjNip: lalu ? lalu.pjNip : '',
+    pelNama: S.settings.petugas || '', pelNip: S.settings.nip || '',
+    petugas: lalu ? JSON.parse(JSON.stringify(lalu.petugas || [])) : [], kesimpulan: '', saran: ''
+  };
+  if (!ada) { var dr = LAPORAN.draf(st, f); f.kesimpulan = dr.kesimpulan; f.saran = dr.saran; }
+  var dirty = false;
+
+  function petugasHtml() {
+    if (!f.petugas.length) return '<div class="panel empty"><b>Belum ada petugas</b>Tambahkan petugas, atau impor daftar petugas dari file.</div>';
+    var semua = semuaPosyandu();
+    return f.petugas.map(function (p, i) {
+      return '<div class="panel stack pet" data-i="' + i + '" style="gap:10px"><div class="row"><b style="flex:1">Petugas ' + (i + 1) + '</b>' +
+        '<button class="btn sm" type="button" data-up="' + i + '"' + (i ? '' : ' disabled') + ' aria-label="Naikkan">↑</button><button class="btn sm" type="button" data-dn="' + i + '"' + (i < f.petugas.length - 1 ? '' : ' disabled') + ' aria-label="Turunkan">↓</button><button class="btn sm danger" type="button" data-del="' + i + '">Hapus</button></div>' +
+        field('Nama & gelar', '<input class="input" data-f="nama" value="' + esc(p.nama) + '" autocomplete="off">') +
+        '<div class="grid2 stack-sm">' + field('NIP / NIK', '<input class="input" data-f="nip" inputmode="numeric" value="' + esc(p.nip) + '" autocomplete="off">') +
+        field('Pangkat / Gol. Ruang', '<input class="input" data-f="pangkat" value="' + esc(p.pangkat) + '" placeholder="mis. Penata Muda / III.a atau –" autocomplete="off">') + '</div>' +
+        field('Jabatan', '<input class="input" data-f="jabatan" list="dlJabatan" value="' + esc(p.jabatan) + '" autocomplete="off">') +
+        field('Tempat kegiatan (posyandu)', '<div class="seg check">' + semua.map(function (ps) {
+          return '<label' + (st.posDikunjungi[ps] ? '' : ' style="opacity:.75"') + '><input type="checkbox" data-pos="' + esc(ps) + '"' + ((p.tempat || []).indexOf(ps) >= 0 ? ' checked' : '') + '>' + esc(title(ps)) + '</label>';
+        }).join('') + '</div>', { help: 'Posyandu yang dikunjungi bulan ini tampil lebih jelas.' }) + '</div>';
+    }).join('');
+  }
+  function render() {
+    var t = st.tot;
+    view.innerHTML = '<div class="stack">' +
+      '<div class="panel">' + field('Bulan laporan', '<input class="input" type="month" id="lapYm" value="' + ym + '" max="' + thisMonth() + '">', { forId: 'lapYm' }) +
+      '<div class="stats" style="margin-top:12px"><div class="stat"><b>' + st.n + '</b><span>balita dikunjungi</span></div><div class="stat"><b>' + st.nPos + '</b><span>posyandu</span></div><div class="stat"><b>' + st.masalahAny + '</b><span>balita bermasalah gizi</span></div></div>' +
+      '<p class="help" style="margin:10px 0 0">Stunting ' + t.st + ' · underweight ' + t.uw + ' · wasting ' + t.ws + ' · gizi lebih ' + t.ov + (st.pk.n ? ' · ' + st.pk.n + ' balita punya data bulan sebelumnya' : '') + '. Tabel dan narasi hasil dihitung otomatis dari data kunjungan.</p>' +
+      (ada ? '<p class="small" style="margin:6px 0 0;color:var(--ok)">✓ Isian laporan bulan ini sudah tersimpan</p>' : '') + '</div>' +
+
+      '<div class="sect"><p class="sect-h"><b>Dasar pelaksanaan &amp; tanda tangan</b></p>' +
+      field('Nomor surat tugas', '<input class="input" id="noSurat" value="' + esc(f.noSurat) + '" placeholder="mis. 0736/ST-BOK/PKM-ML/III/2026" autocomplete="off">', { forId: 'noSurat' }) +
+      field('Tanggal laporan', '<input class="input" type="date" id="tglLaporan" value="' + esc(f.tglLaporan) + '">', { forId: 'tglLaporan' }) +
+      '<div class="grid2 stack-sm">' + field('Penanggung Jawab UKM', '<input class="input" id="pjNama" value="' + esc(f.pjNama) + '" placeholder="Nama & gelar" autocomplete="off">', { forId: 'pjNama' }) +
+      field('NIP Penanggung Jawab', '<input class="input" id="pjNip" value="' + esc(f.pjNip) + '" autocomplete="off">', { forId: 'pjNip' }) + '</div>' +
+      '<div class="grid2 stack-sm">' + field('Pelaksana', '<input class="input" id="pelNama" value="' + esc(f.pelNama) + '" autocomplete="off">', { forId: 'pelNama' }) +
+      field('NIP Pelaksana', '<input class="input" id="pelNip" value="' + esc(f.pelNip) + '" autocomplete="off">', { forId: 'pelNip' }) + '</div></div>' +
+
+      '<div class="sect"><p class="sect-h"><b>Petugas kegiatan</b><span class="hint">' + f.petugas.length + ' orang</span></p>' +
+      '<div class="btnrow">' + (lalu && !ada ? '' : (lalu ? '<button class="btn sm" type="button" id="btnSalinPet">Salin dari ' + esc(LAPORAN.blnLabel(lalu.ym)) + '</button>' : '')) +
+      '<label class="btn sm" for="fileTim">Impor daftar petugas</label><input type="file" id="fileTim" accept=".json,application/json" hidden></div>' +
+      (lalu && !ada ? '<p class="help" style="margin:0">Terisi dari laporan ' + esc(LAPORAN.blnLabel(lalu.ym)) + '. Sesuaikan jika ada perubahan.</p>' : '') +
+      '<div class="stack" id="petList">' + petugasHtml() + '</div>' +
+      '<button class="btn" type="button" id="btnAddPet">+ Tambah petugas</button></div>' +
+
+      '<div class="sect"><p class="sect-h"><b>Kesimpulan dan saran</b><span class="hint">draf otomatis, boleh disunting</span></p>' +
+      field('Kesimpulan', '<textarea class="input" id="kesimpulan" style="min-height:200px">' + esc(f.kesimpulan) + '</textarea>', { forId: 'kesimpulan' }) +
+      field('Saran', '<textarea class="input" id="saran" style="min-height:200px">' + esc(f.saran) + '</textarea>', { forId: 'saran' }) +
+      '<button class="btn sm" type="button" id="btnDraf">Buat ulang draf dari data terbaru</button></div>' +
+
+      '<div class="savebar"><button class="btn" type="button" id="btnSimpanLap">Simpan</button><button class="btn primary" type="button" id="btnUnduhLap"' + (st.n ? '' : ' disabled') + '>Unduh laporan Word</button></div>' +
+      '<datalist id="dlJabatan">' + LAPORAN.JABATAN.map(function (j) { return '<option value="' + esc(j) + '">'; }).join('') + '</datalist></div>';
+    bind();
+  }
+  function baca() {
+    ['noSurat', 'tglLaporan', 'pjNama', 'pjNip', 'pelNama', 'pelNip', 'kesimpulan', 'saran'].forEach(function (k) { var el = $('#' + k); if (el) f[k] = el.value.trim(); });
+    $$('.pet', view).forEach(function (card) {
+      var i = +card.getAttribute('data-i'), p = f.petugas[i]; if (!p) return;
+      $$('[data-f]', card).forEach(function (inpEl) { p[inpEl.getAttribute('data-f')] = inpEl.value.trim(); });
+      p.tempat = $$('[data-pos]', card).filter(function (c) { return c.checked; }).map(function (c) { return c.getAttribute('data-pos'); });
+    });
+  }
+  function simpan() {
+    baca();
+    var o = Object.assign({}, f, { id: 'lap-' + ym, ym: ym, createdAt: f.createdAt || Date.now(), updatedAt: Date.now() });
+    return putRec('laporan', o).then(function () { f = JSON.parse(JSON.stringify(o)); ada = o; dirty = false; });
+  }
+  function bind() {
+    $('#lapYm').onchange = function (e) { if (!e.target.value) return; if (dirty) { baca(); } S.lapYm = e.target.value; vLaporan(); };
+    view.oninput = function () { dirty = true; };
+    view.onchange = function (e) { if (e.target.id !== 'lapYm') dirty = true; };
+    $('#btnAddPet').onclick = function () { baca(); f.petugas.push({ nama: '', nip: '', pangkat: '', jabatan: '', tempat: [] }); dirty = true; render(); var c = $$('.pet', view); if (c.length) c[c.length - 1].scrollIntoView({ block: 'center' }); };
+    $$('[data-del]', view).forEach(function (b) { b.onclick = function () { baca(); var i = +b.getAttribute('data-del'); var nm = f.petugas[i].nama || 'petugas ini'; modal({ title: 'Hapus ' + nm + '?', text: 'Petugas dihapus dari laporan bulan ini.', ok: 'Hapus', danger: true }).then(function (y) { if (!y) return; f.petugas.splice(i, 1); dirty = true; render(); }); }; });
+    $$('[data-up]', view).forEach(function (b) { b.onclick = function () { baca(); var i = +b.getAttribute('data-up'); var x = f.petugas.splice(i, 1)[0]; f.petugas.splice(i - 1, 0, x); dirty = true; render(); }; });
+    $$('[data-dn]', view).forEach(function (b) { b.onclick = function () { baca(); var i = +b.getAttribute('data-dn'); var x = f.petugas.splice(i, 1)[0]; f.petugas.splice(i + 1, 0, x); dirty = true; render(); }; });
+    var bs = $('#btnSalinPet');
+    if (bs) bs.onclick = function () { baca(); modal({ title: 'Salin petugas dari ' + LAPORAN.blnLabel(lalu.ym) + '?', text: 'Daftar petugas di layar ini diganti dengan daftar petugas bulan tersebut.', ok: 'Salin' }).then(function (y) { if (!y) return; f.petugas = JSON.parse(JSON.stringify(lalu.petugas || [])); if (!f.pjNama) { f.pjNama = lalu.pjNama; f.pjNip = lalu.pjNip; } dirty = true; render(); }); };
+    $('#fileTim').onchange = function (e) {
+      var file = e.target.files[0]; if (!file) return;
+      file.text().then(function (txt) {
+        var d; try { d = JSON.parse(txt); } catch (x) { d = null; }
+        var list = d && (Array.isArray(d) ? d : d.petugas);
+        if (!Array.isArray(list) || !list.length) { toast('File tidak berisi daftar petugas.', 3500); return; }
+        baca();
+        var sp = semuaPosyandu();
+        f.petugas = list.map(function (p) { return { nama: p.nama || '', nip: p.nip || '', pangkat: p.pangkat || '', jabatan: p.jabatan || '', tempat: (p.tempat || []).map(function (t) { return String(t).toUpperCase(); }).filter(function (t) { return sp.indexOf(t) >= 0; }) }; });
+        dirty = true; render(); toast(f.petugas.length + ' petugas diimpor. Periksa lalu simpan.');
+      });
+      e.target.value = '';
+    };
+    $('#btnDraf').onclick = function () {
+      baca();
+      modal({ title: 'Buat ulang draf?', text: 'Isi kesimpulan dan saran saat ini diganti dengan draf baru dari data kunjungan terbaru.', ok: 'Buat ulang' }).then(function (y) {
+        if (!y) return; st = LAPORAN.hitung(ym); var dr = LAPORAN.draf(st, f); f.kesimpulan = dr.kesimpulan; f.saran = dr.saran; dirty = true; render(); toast('Draf diperbarui');
+      });
+    };
+    $('#btnSimpanLap').onclick = function () { simpan().then(function () { toast('Isian laporan tersimpan'); render(); }); };
+    $('#btnUnduhLap').onclick = function () {
+      var bt = $('#btnUnduhLap'); bt.disabled = true; bt.textContent = 'Menyusun…';
+      simpan().then(loadDocx).then(function () { st = LAPORAN.hitung(ym); return LAPORAN.buat(st, f, S.settings); })
+        .then(function (file) { return canShareFiles() ? modal({ title: 'Laporan siap', text: file.name, ok: 'Bagikan', cancel: 'Unduh' }).then(function (y) { return y ? shareFile(file) : downloadBlob(file.blob, file.name); }) : downloadBlob(file.blob, file.name); })
+        .catch(function (err) { toast('Gagal membuat laporan: ' + err.message, 4500); })
+        .then(function () { render(); });
+    };
+  }
+  render();
+}
+
 /* ================= Pengaturan & cadangan ================= */
 function vPengaturan() {
   setNav('pengaturan'); setTitle('Pengaturan', 'Versi ' + APP_VERSION);
@@ -699,7 +828,7 @@ function vPengaturan() {
     saveSettings().then(function () { toast('Pengaturan tersimpan'); });
   });
   $('#btnBackup').onclick = function () {
-    var data = { app: 'kunjungan-balita-moncongloe', versi: APP_VERSION, dibuat: new Date().toISOString(), settings: st, balita: allRecs('balita'), kunjungan: allRecs('kunjungan') };
+    var data = { app: 'kunjungan-balita-moncongloe', versi: APP_VERSION, dibuat: new Date().toISOString(), settings: st, balita: allRecs('balita'), kunjungan: allRecs('kunjungan'), laporan: allRecs('laporan') };
     var blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
     var name = 'cadangan-kunjungan-balita-' + today() + '.json';
     st.lastBackup = Date.now(); saveSettings();
@@ -729,9 +858,9 @@ function vPengaturan() {
           (inc || []).forEach(function (o) { if (!m[o.id] || (o.updatedAt || 0) > (m[o.id].updatedAt || 0)) { o._dirty = 1; m[o.id] = o; } });
           return Object.keys(m).map(function (k) { return m[k]; });
         };
-        var nb = mergeArr(allRecs('balita'), d.balita), nk = mergeArr(allRecs('kunjungan'), d.kunjungan);
-        var p = ganti ? Promise.all([DB.clear('balita'), DB.clear('kunjungan')]) : Promise.resolve();
-        p.then(function () { return Promise.all([DB.putMany('balita', nb), DB.putMany('kunjungan', nk)]); }).then(function () {
+        var nb = mergeArr(allRecs('balita'), d.balita), nk = mergeArr(allRecs('kunjungan'), d.kunjungan), nl = mergeArr(allRecs('laporan'), d.laporan || []);
+        var p = ganti ? Promise.all([DB.clear('balita'), DB.clear('kunjungan'), DB.clear('laporan')]) : Promise.resolve();
+        p.then(function () { return Promise.all([DB.putMany('balita', nb), DB.putMany('kunjungan', nk), DB.putMany('laporan', nl)]); }).then(function () {
           if (d.settings && (ganti || !st.petugas)) { ['petugas', 'nip', 'puskesmas'].forEach(function (x) { if (d.settings[x]) st[x] = d.settings[x]; }); saveSettings(); }
           loadAll().then(function () { toast('Data dipulihkan: ' + S.balita.length + ' balita, ' + S.kunjungan.length + ' kunjungan'); vPengaturan(); if (window.SYNC) SYNC.soon(); });
         });
@@ -742,7 +871,7 @@ function vPengaturan() {
   $('#btnReset').onclick = function () {
     modal({ title: 'Hapus semua data?', html: '<p class="small" style="margin:0 0 10px">Semua balita dan kunjungan di perangkat ini akan dihapus. Simpan cadangan dulu jika masih diperlukan. Jika sinkron aktif, data di Google Sheet tidak ikut terhapus dan akan terunduh lagi.</p>' + field('Ketik HAPUS untuk melanjutkan', '<input class="input" id="konf" autocomplete="off">', { forId: 'konf' }), ok: 'Hapus semua', danger: true, collect: function (root) { return { t: $('#konf', root).value.trim() }; } }).then(function (r) {
       if (!r) return; if (r.t !== 'HAPUS') { toast('Dibatalkan: ketikan tidak sesuai.'); return; }
-      Promise.all([DB.clear('balita'), DB.clear('kunjungan')]).then(function () { S.balita = []; S.kunjungan = []; S.tomb = []; if (window.SYNC) SYNC.resetPull(); toast('Semua data di perangkat ini dihapus'); vPengaturan(); });
+      Promise.all([DB.clear('balita'), DB.clear('kunjungan'), DB.clear('laporan')]).then(function () { S.balita = []; S.kunjungan = []; S.laporan = []; S.tomb = []; if (window.SYNC) SYNC.resetPull(); toast('Semua data di perangkat ini dihapus'); vPengaturan(); });
     });
   };
   if (navigator.storage && navigator.storage.persisted) navigator.storage.persisted().then(function (p) { var el = $('#persistInfo'); if (el) el.textContent = p ? 'Penyimpanan permanen aktif: browser tidak akan menghapus data otomatis.' : 'Penyimpanan belum permanen. Pasang aplikasi ke layar utama agar data lebih aman.'; });

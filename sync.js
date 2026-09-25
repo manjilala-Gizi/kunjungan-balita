@@ -12,13 +12,13 @@ var SYNC = (function () {
   }
   function save() { return DB.put('meta', cfg); }
   function findRec(store, id) {
-    var a = store === 'balita' ? S.balita : S.kunjungan;
+    var a = S[store] || [];
     for (var i = 0; i < a.length; i++) if (a[i].id === id) return a[i];
     for (var j = 0; j < S.tomb.length; j++) if (S.tomb[j].store === store && S.tomb[j].rec.id === id) return S.tomb[j].rec;
     return null;
   }
   function dirtyList(store) { return allRecs(store).filter(function (o) { return o._dirty; }); }
-  function pending() { return dirtyList('balita').length + dirtyList('kunjungan').length; }
+  function pending() { return dirtyList('balita').length + dirtyList('kunjungan').length + dirtyList('laporan').length; }
   function clean(o) { var c = Object.assign({}, o); delete c._dirty; return c; }
 
   function post(body) {
@@ -49,7 +49,8 @@ var SYNC = (function () {
 
   function push() {
     var items = dirtyList('balita').map(function (o) { return ['balita', o, o.updatedAt]; })
-      .concat(dirtyList('kunjungan').map(function (o) { return ['kunjungan', o, o.updatedAt]; }));
+      .concat(dirtyList('kunjungan').map(function (o) { return ['kunjungan', o, o.updatedAt]; }))
+      .concat(dirtyList('laporan').map(function (o) { return ['laporan', o, o.updatedAt]; }));
     var n = 0, chain = Promise.resolve();
     for (var i = 0; i < items.length; i += BATCH) {
       (function (part) {
@@ -57,7 +58,8 @@ var SYNC = (function () {
           return post({
             aksi: 'kirim',
             balita: part.filter(function (x) { return x[0] === 'balita'; }).map(function (x) { return { data: clean(x[1]) }; }),
-            kunjungan: part.filter(function (x) { return x[0] === 'kunjungan'; }).map(function (x) { return { data: clean(x[1]), info: infoK(x[1]) }; })
+            kunjungan: part.filter(function (x) { return x[0] === 'kunjungan'; }).map(function (x) { return { data: clean(x[1]), info: infoK(x[1]) }; }),
+            laporan: part.filter(function (x) { return x[0] === 'laporan'; }).map(function (x) { return { data: clean(x[1]) }; })
           });
         }).then(function () {
           return Promise.all(part.map(function (x) {
@@ -75,7 +77,7 @@ var SYNC = (function () {
     function step() {
       return post({ aksi: 'ambil', sejak: cfg.sejak }).then(function (j) {
         var ops = [];
-        [['balita', j.balita || []], ['kunjungan', j.kunjungan || []]].forEach(function (pair) {
+        [['balita', j.balita || []], ['kunjungan', j.kunjungan || []], ['laporan', j.laporan || []]].forEach(function (pair) {
           pair[1].forEach(function (r) {
             var cur = findRec(pair[0], r.id), ru = r.updatedAt || 0, cu = cur ? (cur.updatedAt || 0) : -1;
             if (cur && (cu > ru || (cu === ru))) return; // versi di perangkat sama atau lebih baru
@@ -173,7 +175,7 @@ var SYNC = (function () {
         if (first) cfg.sejak = 0;
         var jobs = [];
         if (first) { // kirim semua data yang sudah ada di perangkat
-          ['balita', 'kunjungan'].forEach(function (st) { allRecs(st).forEach(function (o) { if (!o._dirty) { o._dirty = 1; jobs.push(DB.put(st, o)); } }); });
+          ['balita', 'kunjungan', 'laporan'].forEach(function (st) { allRecs(st).forEach(function (o) { if (!o._dirty) { o._dirty = 1; jobs.push(DB.put(st, o)); } }); });
         }
         return Promise.all(jobs).then(save).then(function () {
           toast(j.pesan || 'Terhubung', 3000);

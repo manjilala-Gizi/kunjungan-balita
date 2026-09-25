@@ -40,8 +40,8 @@ button,input,select,textarea{font:inherit;color:inherit}
 .iconbtn:active{background:rgba(255,255,255,.15)}
 .iconbtn svg{width:22px;height:22px}
 main{padding:16px 16px calc(96px + env(safe-area-inset-bottom,0px));max-width:760px;margin:0 auto}
-.nav{position:fixed;left:0;right:0;bottom:0;z-index:30;background:var(--surface);border-top:1px solid var(--line);display:grid;grid-template-columns:repeat(4,1fr);padding-bottom:env(safe-area-inset-bottom,0px)}
-.nav a{display:flex;flex-direction:column;align-items:center;gap:2px;padding:8px 0 10px;color:var(--muted);text-decoration:none;font-size:12px}
+.nav{position:fixed;left:0;right:0;bottom:0;z-index:30;background:var(--surface);border-top:1px solid var(--line);display:grid;grid-template-columns:repeat(5,1fr);padding-bottom:env(safe-area-inset-bottom,0px)}
+.nav a{display:flex;flex-direction:column;align-items:center;gap:2px;padding:8px 0 10px;color:var(--muted);text-decoration:none;font-size:11.5px}
 .nav a svg{width:24px;height:24px}
 .nav a.on{color:var(--brand);font-weight:600}
 .stack{display:flex;flex-direction:column;gap:12px}
@@ -190,12 +190,15 @@ details.panel[open] summary{margin-bottom:12px}
   <a href="#/beranda" data-nav="beranda"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-7 9 7v9a1 1 0 01-1 1h-5v-6H9v6H4a1 1 0 01-1-1z"/></svg>Beranda</a>
   <a href="#/balita" data-nav="balita"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="7" r="3.5"/><path d="M5 21v-1.5A5.5 5.5 0 0110.5 14h3a5.5 5.5 0 015.5 5.5V21"/></svg>Balita</a>
   <a href="#/rekap" data-nav="rekap"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>Rekap</a>
+  <a href="#/laporan" data-nav="laporan"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg>Laporan</a>
   <a href="#/pengaturan" data-nav="pengaturan"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z"/></svg>Pengaturan</a>
 </nav>
 <div id="modalRoot"></div>
 <script src="who-lms.js"></script>
 <script src="gizi.js"></script>
 <script src="km.js"></script>
+<script src="laporan-teks.js"></script>
+<script src="laporan.js"></script>
 <script src="app.js"></script>
 <script src="sync.js"></script>
 </body>
