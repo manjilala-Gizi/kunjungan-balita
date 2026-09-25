@@ -1,6 +1,6 @@
 /* Kunjungan Balita Moncongloe — aplikasi offline (PWA) */
 'use strict';
-var APP_VERSION = '1.1.0';
+var APP_VERSION = '1.2.0';
 GIZI.init(WHO_LMS);
 
 /* ================= Master data ================= */
@@ -422,7 +422,8 @@ function vDetail(id) {
     var dbb = prev && k.bb != null && prev.bb != null ? Math.round((k.bb - prev.bb) * 100) / 100 : null;
     return '<div class="visit"><div class="top"><b>' + esc(tglPanjang(k.tgl)) + '</b><span class="small muted">umur ' + esc(umurTeks(r.umurHari)) + '</span><span class="spacer"></span><a class="btn sm" href="#/kunjungan/' + k.id + '/edit">Ubah</a></div>' +
       '<div class="meas num">BB ' + fmtNum(k.bb) + ' kg' + (dbb != null ? ' (' + (dbb > 0 ? '+' : '') + fmtNum(dbb) + ')' : '') + ' · ' + (k.caraUkur === 'terlentang' ? 'PB ' : 'TB ') + fmtNum(k.tb) + ' cm' + (k.lk != null ? ' · LK ' + fmtNum(k.lk) : '') + (k.lila != null ? ' · LiLA ' + fmtNum(k.lila) : '') + '</div>' +
-      '<div class="chips row" style="gap:4px">' + chip('BB/U', r.BBU) + chip('TB/U', r.TBU) + chip('BB/TB', r.BBTB) + '</div></div>';
+      '<div class="chips row" style="gap:4px">' + chip('BB/U', r.BBU) + chip('TB/U', r.TBU) + chip('BB/TB', r.BBTB) + '</div>' +
+      (KM.eduTeks(k) ? '<div class="meas">Edukasi: ' + esc(KM.eduTeks(k)) + '</div>' : '') + '</div>';
   }).join('') + '</div>';
 
   h += '<h2>Data induk</h2><details class="panel"><summary>Identitas anak, riwayat lahir, orang tua</summary><dl class="kv">' +
@@ -514,8 +515,7 @@ function vFormKunjungan(balitaId, kid) {
     field('Riwayat kehamilan ibu', segHtml('kek', ['KEK', 'Tidak KEK'], k.kek)) +
     field('Penyakit penyerta', '<textarea class="input" id="penyakit" name="penyakit" style="min-height:64px" placeholder="Tidak ada">' + esc(k.penyakit) + '</textarea><div class="qchips" data-target="penyakit">' + ['Tidak ada', 'Demam', 'Batuk', 'Flu', 'Diare', 'ISPA', 'Sariawan'].map(function (x) { return '<button type="button">' + x + '</button>'; }).join('') + '</div>', { forId: 'penyakit' }) + '</div>' +
 
-    '<div class="sect"><p class="sect-h"><b>Kebiasaan Makan</b></p>' +
-    field('Pola makan balita', '<textarea class="input" id="kebiasaan" name="kebiasaan" placeholder="Frekuensi makan, jenis makanan, jajanan, nafsu makan, kebiasaan cuci tangan…">' + esc(k.kebiasaan) + '</textarea>', { forId: 'kebiasaan' }) + '</div>' +
+    KM.formKebiasaan(k, prev) + KM.formEdukasi(k, prev) +
     '<div id="formErr"></div>' +
     '<div class="savebar">' + (!isNew ? '<button class="btn danger" type="button" id="btnHapusK" style="flex:0 0 auto">Hapus</button>' : '') + '<button class="btn primary" type="submit">Simpan kunjungan</button></div></form>';
   view.innerHTML = h;
@@ -528,8 +528,14 @@ function vFormKunjungan(balitaId, kid) {
       tgl: g('tgl'), bb: num(g('bb')), tb: num(g('tb')), caraUkur: g('caraUkur'), lk: num(g('lk')), lila: num(g('lila')), mpasi: mp,
       asiEks: g('asiEks'), asiLanjut: g('asiLanjut'), umurMpasi: num(g('umurMpasi')), belumMpasi: !!fd.get('belumMpasi'), mpasiKet: g('mpasiKet'),
       bpjs: g('bpjs'), airBersih: g('airBersih'), jamban: g('jamban'), imunisasi: g('imunisasi'), rokok: g('rokok'), cacingan: g('cacingan'), kek: g('kek'),
-      penyakit: g('penyakit'), kebiasaan: g('kebiasaan')
+      penyakit: g('penyakit'), kebiasaan: g('kebiasaan'), km: KM.baca(fd).km, edukasi: KM.baca(fd).edukasi, edukasiLain: KM.baca(fd).edukasiLain
     };
+  }
+  var lastR = null;
+  function updateSaran() {
+    var d = readK();
+    if (!lastR) lastR = GIZI.hitung({ jk: b.jk, tglLahir: b.tglLahir, tglUkur: d.tgl, bb: d.bb, tb: d.tb, caraUkur: d.caraUkur });
+    KM.tampilSaran(fm, KM.saran(d, b, lastR));
   }
   function updateZ() {
     var d = readK();
@@ -550,15 +556,19 @@ function vFormKunjungan(balitaId, kid) {
     if (notes.length) zb += '<div class="warnbox" style="margin-top:10px"><ul>' + notes.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul></div>';
     if (info.length) zb += '<div class="warnbox info" style="margin-top:10px">' + esc(info.join(' ')) + '</div>';
     $('#zbox').innerHTML = zb;
+    lastR = r; updateSaran();
   }
   function zrow(l, z, kat) { return '<tr><td>' + l + '</td><td>' + (z == null ? '—' : (z > 0 ? '+' : '') + z.toFixed(2).replace('.', ',')) + '</td><td>' + (kat ? chip('', kat) : '<span class="muted small">isi BB & PB/TB</span>') + '</td></tr>'; }
   fm.addEventListener('input', function (e) { if (['tgl', 'bb', 'tb'].indexOf(e.target.name) >= 0) updateZ(); });
-  fm.addEventListener('change', function (e) { if (e.target.name === 'caraUkur') { caraTouched = true; } if (['tgl', 'caraUkur'].indexOf(e.target.name) >= 0) updateZ(); });
+  fm.addEventListener('change', function (e) { if (e.target.name === 'caraUkur') { caraTouched = true; } if (['tgl', 'caraUkur'].indexOf(e.target.name) >= 0) updateZ(); else updateSaran(); });
+  var bs = $('#btnSalinKm');
+  if (bs) bs.onclick = function () { KM.isiDari(fm, prev.km || {}); if (!$('#kebiasaan').value.trim() && prev.kebiasaan) $('#kebiasaan').value = prev.kebiasaan; updateSaran(); toast('Kebiasaan makan disalin. Cek dan sesuaikan.'); };
   $('#belumMpasi').addEventListener('change', function (e) { if (e.target.checked) $('#umurMpasi').value = ''; });
   $$('.qchips button').forEach(function (bt) {
     bt.addEventListener('click', function () {
       var ta = $('#' + bt.parentNode.getAttribute('data-target')), v = bt.textContent;
       if (v === 'Tidak ada' || !ta.value.trim() || ta.value.trim() === 'Tidak ada') ta.value = v; else ta.value = ta.value.replace(/[\s,]+$/, '') + ', ' + v.toLowerCase();
+      updateSaran();
     });
   });
   updateZ();
@@ -629,7 +639,7 @@ function vRekap() {
     function run(pos, share) {
       if (!S.settings.petugas) toast('Nama pelaksana belum diisi di Pengaturan; tanda tangan akan kosong.', 3500);
       loadLibs().then(function () {
-        return REKAP.buildPosyandu({ posyandu: pos, desa: desaOf(pos), ym: ym, rows: sortRows(byPos[pos]), settings: S.settings, hasil: hasil });
+        return REKAP.buildPosyandu({ posyandu: pos, desa: desaOf(pos), ym: ym, rows: sortRows(byPos[pos]), settings: S.settings, hasil: hasil, kmTeks: KM.teks, eduTeks: KM.eduTeks });
       }).then(function (f) { return share ? shareFile(f) : downloadBlob(f.blob, f.name); }).catch(function (err) { toast('Gagal membuat Excel: ' + err.message, 4000); });
     }
     $$('[data-dl]', view).forEach(function (bt) { bt.onclick = function () { run(bt.getAttribute('data-dl'), false); }; });
@@ -639,7 +649,7 @@ function vRekap() {
       bz.disabled = true; bz.textContent = 'Menyiapkan…';
       loadLibs().then(function () {
         var zip = new JSZip();
-        var jobs = Object.keys(byPos).map(function (pos) { return REKAP.buildPosyandu({ posyandu: pos, desa: desaOf(pos), ym: ym, rows: sortRows(byPos[pos]), settings: S.settings, hasil: hasil }).then(function (f) { zip.file(f.name, f.blob); }); });
+        var jobs = Object.keys(byPos).map(function (pos) { return REKAP.buildPosyandu({ posyandu: pos, desa: desaOf(pos), ym: ym, rows: sortRows(byPos[pos]), settings: S.settings, hasil: hasil, kmTeks: KM.teks, eduTeks: KM.eduTeks }).then(function (f) { zip.file(f.name, f.blob); }); });
         return Promise.all(jobs).then(function () { return zip.generateAsync({ type: 'blob' }); });
       }).then(function (blob) { downloadBlob(blob, 'REKAP KUNJUNGAN LAPANGAN BALITA ' + bulanLabel(ym).toUpperCase() + '.zip'); })
         .catch(function (err) { toast('Gagal membuat ZIP: ' + err.message, 4000); })
@@ -749,7 +759,7 @@ function muatContoh() {
   ];
   var base = { asiEks: 'Ya', asiLanjut: 'Ya', umurMpasi: 6, bpjs: 'Ya', airBersih: 'Ya', jamban: 'Ya', imunisasi: 'Ya, Lengkap', rokok: 'Ya', cacingan: 'Tidak', kek: 'Tidak KEK', penyakit: 'Tidak ada', mpasi: { asi: false, pokok: true, hewani: true, nabati: true, sayur: true, buah: true, telur: true } };
   var ks = [];
-  var add = function (b, back, day, bb, tb, cara, extra) { ks.push(Object.assign({}, base, { _dirty: 1, id: uid(), balitaId: b.id, tgl: ym(back, day), bb: bb, tb: tb, caraUkur: cara, lk: 47, lila: 14.5, kebiasaan: 'Makan 3x sehari (nasi, ikan, sayur bening). Suka jajan biskuit dan minuman kemasan. Jarang makan buah.', createdAt: Date.now() - back * 1e6, updatedAt: Date.now() - back * 1e6 }, extra || {})); };
+  var add = function (b, back, day, bb, tb, cara, extra) { ks.push(Object.assign({}, base, { _dirty: 1, id: uid(), balitaId: b.id, tgl: ym(back, day), bb: bb, tb: tb, caraUkur: cara, lk: 47, lila: 14.5, kebiasaan: 'Tidak mau makan kuning telur.', km: { makan: '3x', selingan: '2x', jenisSelingan: ['Biskuit/roti', 'Minuman manis/kemasan'], nafsu: 'Baik', sayur: 'Kadang-kadang', buah: 'Jarang/tidak pernah', hewani: 'Setiap hari', jajan: 'Sering', susu: ['Susu kotak (UHT)'], cara: ['Disuapi', 'Sambil main/nonton'], cuci: 'Kadang-kadang' }, edukasi: ['piring', 'jajan', 'responsif'], createdAt: Date.now() - back * 1e6, updatedAt: Date.now() - back * 1e6 }, extra || {})); };
   add(bs[0], 2, 10, 10.6, 84.9, 'berdiri'); add(bs[0], 1, 11, 10.8, 85.6, 'berdiri'); add(bs[0], 0, 1, 11.0, 86.2, 'berdiri');
   add(bs[1], 2, 12, 7.6, 72.0, 'terlentang', { mpasi: { asi: true, pokok: true, hewani: false, nabati: true, sayur: true, buah: false, telur: true } });
   add(bs[1], 0, 1, 7.9, 73.4, 'terlentang', { mpasi: { asi: true, pokok: true, hewani: false, nabati: true, sayur: true, buah: false, telur: true }, penyakit: 'Demam, batuk' });

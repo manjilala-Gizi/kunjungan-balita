@@ -29,7 +29,7 @@ var REKAP = (function () {
     }
   }
 
-  function writeBlock(ws, r, no, b, k, hasil) {
+  function writeBlock(ws, r, no, b, k, hasil, kmTeks, eduTeks) {
     var h = hasil(b, k);
     var mp = k.mpasi || {};
     var ya = function (x) { return x ? 'Ya' : 'Tidak'; };
@@ -84,7 +84,18 @@ var REKAP = (function () {
     setCell(ws, 'J' + (r + 7), 'Penyakit Penyerta : ' + (k.penyakit || 'Tidak ada'), { align: { wrapText: true } });
     // L: kebiasaan makan
     ws.mergeCells(r, 12, r + 9, 12);
-    setCell(ws, 'L' + r, k.kebiasaan || '', { align: { wrapText: true } });
+    var kmT = kmTeks ? kmTeks(k) : (k.kebiasaan || ''), eduT = eduTeks ? eduTeks(k) : '';
+    var cL = setCell(ws, 'L' + r, '', { align: { wrapText: true } });
+    if (eduT) cL.value = { richText: [{ text: kmT + (kmT ? '\n\n' : ''), font: FONT }, { text: 'Edukasi: ', font: Object.assign({}, FONT, { bold: true }) }, { text: eduT, font: FONT }] };
+    else cL.value = kmT || null;
+    // tinggi blok menyesuaikan panjang teks kolom L (lebar ±32 karakter per baris)
+    var full = kmT + (eduT ? '\n\nEdukasi: ' + eduT : '');
+    var lines = full.split('\n').reduce(function (a, par) { return a + Math.max(1, Math.ceil(par.length / 32)); }, 0);
+    var penyakit = Math.ceil(('Penyakit Penyerta : ' + (k.penyakit || 'Tidak ada')).length / 24);
+    var tinggi = Math.max(150, lines * 14.5 + 8, penyakit * 15 + 105);
+    var perBaris = Math.round(tinggi / 10 * 4) / 4;
+    for (var i = 0; i < 10; i++) ws.getRow(r + i).height = perBaris;
+    return perBaris * 10;
   }
 
   function buildPosyandu(opt) {
@@ -118,9 +129,12 @@ var REKAP = (function () {
     });
 
     var r = 5;
+    // pemisah halaman otomatis agar satu blok balita tidak terbelah (A4 lanskap, skala 80%)
+    var ruang = 535, terpakai = 0; // halaman pertama dikurangi kop
     opt.rows.forEach(function (row, i) {
-      writeBlock(ws, r, i + 1, row.b, row.k, opt.hasil);
-      if ((i + 1) % 4 === 0 && i + 1 < opt.rows.length) ws.getRow(r + 9).addPageBreak(); // 4 balita per halaman, blok tidak terpotong
+      var h = writeBlock(ws, r, i + 1, row.b, row.k, opt.hasil, opt.kmTeks, opt.eduTeks);
+      if (i > 0 && terpakai + h > ruang) { ws.getRow(r - 1).addPageBreak(); terpakai = 0; ruang = 600; }
+      terpakai += h;
       r += 10;
     });
     var last = r - 1;

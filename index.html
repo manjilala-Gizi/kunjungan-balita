@@ -171,6 +171,11 @@ details.panel[open] summary{margin-bottom:12px}
 .credit img{width:min(220px,70%);height:auto}
 .credit p{margin:0;font-size:12.5px;color:var(--muted)}
 .credit b{color:var(--ink)}
+.seg label.sug{border-color:var(--accent);border-style:dashed}
+.seg label.sug::after{content:"saran";margin-left:6px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--accent)}
+.seg label.sug:has(input:checked)::after{color:var(--brand-ink)}
+.saran{border:1px dashed var(--accent);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:6px;font-size:13.5px}
+.saran ul{margin:0;padding-left:18px}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 </head>
@@ -190,6 +195,7 @@ details.panel[open] summary{margin-bottom:12px}
 <div id="modalRoot"></div>
 <script src="who-lms.js"></script>
 <script src="gizi.js"></script>
+<script src="km.js"></script>
 <script src="app.js"></script>
 <script src="sync.js"></script>
 </body>

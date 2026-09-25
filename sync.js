@@ -42,7 +42,8 @@ var SYNC = (function () {
     return {
       nama: b.nama, nik: b.nik, jk: b.jk, tglLahir: b.tglLahir, desa: b.desa, posyandu: b.posyandu,
       umurBulan: h.umurBulan != null ? Math.round(h.umurBulan * 10) / 10 : '',
-      zBBU: h.zBBU, BBU: h.BBU, zTBU: h.zTBU, TBU: h.TBU, zBBTB: h.zBBTB, BBTB: h.BBTB
+      zBBU: h.zBBU, BBU: h.BBU, zTBU: h.zTBU, TBU: h.TBU, zBBTB: h.zBBTB, BBTB: h.BBTB,
+      kmTeks: window.KM ? KM.teks(k) : '', edukasi: window.KM ? KM.eduTeks(k) : ''
     };
   }
 
