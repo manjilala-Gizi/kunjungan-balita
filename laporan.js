@@ -15,6 +15,8 @@ var LAPORAN = (function () {
     var per = latestPerBalita(ym), rows = [];
     Object.keys(per).forEach(function (bid) { var b = balitaById(bid); if (b) rows.push({ b: b, k: per[bid], r: hasil(b, per[bid]) }); });
     var st = { ym: ym, n: rows.length, rows: rows };
+    st.sasaran = S.balita.filter(IMPOR.isSasaran).length;
+    st.sasDik = rows.filter(function (x) { return IMPOR.isSasaran(x.b); }).length;
     // jadwal: semua pasangan (tanggal, posyandu) di bulan itu
     var jad = {};
     S.kunjungan.forEach(function (k) { if (k.tgl.slice(0, 7) !== ym) return; var b = balitaById(k.balitaId); if (!b) return; jad[k.tgl + '|' + b.posyandu] = { tgl: k.tgl, pos: b.posyandu }; });
@@ -117,7 +119,7 @@ var LAPORAN = (function () {
   function draf(st, form) {
     var bl = blnLabel(st.ym), t = st.tot, K = [], Sr = [];
     if (!st.n) return { kesimpulan: 'Belum ada data kunjungan pada bulan ' + bl + '.', saran: '' };
-    K.push('Pada bulan ' + bl + ' telah dilakukan kunjungan lapangan terhadap ' + st.n + ' balita di ' + st.nPos + ' posyandu pada ' + st.nDesa + ' desa di wilayah kerja Puskesmas Moncongloe.');
+    K.push('Pada bulan ' + bl + ' telah dilakukan kunjungan lapangan terhadap ' + st.n + ' balita di ' + st.nPos + ' posyandu pada ' + st.nDesa + ' desa di wilayah kerja Puskesmas Moncongloe' + (st.sasaran ? ', termasuk ' + st.sasDik + ' dari ' + st.sasaran + ' balita sasaran dengan BB/U kurang/sangat kurang berdasarkan data e-PPGBM (cakupan ' + pct(st.sasDik, st.sasaran) + ')' : '') + '.');
     K.push('Berdasarkan hasil pengukuran antropometri, ditemukan balita dengan berat badan kurang/sangat kurang (underweight) sebanyak ' + t.uw + ' orang (' + pct(t.uw, t.n) + '), pendek/sangat pendek (stunting) sebanyak ' + t.st + ' orang (' + pct(t.st, t.n) + '), gizi kurang/gizi buruk (wasting) sebanyak ' + t.ws + ' orang (' + pct(t.ws, t.n) + ')' + (t.ov ? ', serta gizi lebih/obesitas sebanyak ' + t.ov + ' orang (' + pct(t.ov, t.n) + ')' : '') + '.');
     var pk = st.pk;
     if (pk.n) K.push('Dari ' + pk.n + ' balita yang memiliki data kunjungan sebelumnya, ' + pk.bbNaik + ' balita (' + pct(pk.bbNaik, pk.n) + ') mengalami kenaikan berat badan' + (pk.pulih ? ' dan ' + pk.pulih + ' balita yang sebelumnya bermasalah gizi kini berada pada kategori normal' : '') + '.');
@@ -240,7 +242,7 @@ var LAPORAN = (function () {
     paras.push(H('C.', 'HASIL YANG DICAPAI', I1));
     var t = st.tot;
     paras.push(H('1.', 'Jumlah Balita dan Status Gizi', I2));
-    paras.push(P('Jumlah balita yang dikunjungi pada bulan ' + bl + ' sebanyak ' + st.n + ' orang di ' + st.nDesa + ' desa. Dari jumlah tersebut, balita dengan berat badan kurang/sangat kurang (underweight) sebanyak ' + t.uw + ' orang (' + pct(t.uw, t.n) + '), pendek/sangat pendek (stunting) sebanyak ' + t.st + ' orang (' + pct(t.st, t.n) + '), gizi kurang/gizi buruk (wasting) sebanyak ' + t.ws + ' orang (' + pct(t.ws, t.n) + '), dan gizi lebih/obesitas sebanyak ' + t.ov + ' orang (' + pct(t.ov, t.n) + '). Seorang balita dapat mengalami lebih dari satu masalah gizi; secara keseluruhan terdapat ' + st.masalahAny + ' balita (' + pct(st.masalahAny, st.n) + ') dengan sedikitnya satu masalah gizi. Rincian menurut desa disajikan pada tabel berikut.', { indent: { left: I2, firstLine: 567 } }));
+    paras.push(P((st.sasaran ? 'Sasaran kunjungan lapangan adalah balita dengan status BB/U kurang dan sangat kurang berdasarkan data penimbangan e-PPGBM, yaitu sebanyak ' + st.sasaran + ' balita, dan ' + st.sasDik + ' balita di antaranya (' + pct(st.sasDik, st.sasaran) + ') telah dikunjungi pada bulan ini. ' : '') + 'Jumlah balita yang dikunjungi pada bulan ' + bl + ' sebanyak ' + st.n + ' orang di ' + st.nDesa + ' desa. Dari jumlah tersebut, balita dengan berat badan kurang/sangat kurang (underweight) sebanyak ' + t.uw + ' orang (' + pct(t.uw, t.n) + '), pendek/sangat pendek (stunting) sebanyak ' + t.st + ' orang (' + pct(t.st, t.n) + '), gizi kurang/gizi buruk (wasting) sebanyak ' + t.ws + ' orang (' + pct(t.ws, t.n) + '), dan gizi lebih/obesitas sebanyak ' + t.ov + ' orang (' + pct(t.ov, t.n) + '). Seorang balita dapat mengalami lebih dari satu masalah gizi; secara keseluruhan terdapat ' + st.masalahAny + ' balita (' + pct(st.masalahAny, st.n) + ') dengan sedikitnya satu masalah gizi. Rincian menurut desa disajikan pada tabel berikut.', { indent: { left: I2, firstLine: 567 } }));
     paras.push(caption('Jumlah Balita Dikunjungi dan Masalah Gizi menurut Desa', I2));
     var dRows = st.desa.map(function (d) { return [title(d.desa), d.n + ' orang', d.uw + ' orang', d.st + ' orang', d.ws + ' orang', d.ov + ' orang']; });
     dRows.push(['TOTAL', t.n + ' orang', t.uw + ' orang (' + pct(t.uw, t.n) + ')', t.st + ' orang (' + pct(t.st, t.n) + ')', t.ws + ' orang (' + pct(t.ws, t.n) + ')', t.ov + ' orang (' + pct(t.ov, t.n) + ')']);

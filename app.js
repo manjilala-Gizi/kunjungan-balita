@@ -1,6 +1,6 @@
 /* Kunjungan Balita Moncongloe — aplikasi offline (PWA) */
 'use strict';
-var APP_VERSION = '1.3.0';
+var APP_VERSION = '1.4.0';
 GIZI.init(WHO_LMS);
 
 /* ================= Master data ================= */
@@ -82,7 +82,7 @@ var DB = {
   putMany: function (store, arr) { return DB.tx(store, 'readwrite', function (s) { arr.forEach(function (o) { s.put(o); }); }); }
 };
 
-var S = { balita: [], kunjungan: [], laporan: [], tomb: [], settings: { key: 'settings', puskesmas: 'MONCONGLOE', petugas: '', nip: '', lastBackup: null }, filter: { q: '', desa: '', pos: '', belum: false } };
+var S = { balita: [], kunjungan: [], laporan: [], tomb: [], settings: { key: 'settings', puskesmas: 'MONCONGLOE', petugas: '', nip: '', lastBackup: null }, filter: { q: '', desa: '', pos: '', belum: false, sasaran: false } };
 
 function loadAll() {
   return Promise.all([DB.all('balita'), DB.all('kunjungan'), DB.get('meta', 'settings'), DB.all('laporan')]).then(function (r) {
@@ -187,6 +187,7 @@ function route() {
   if (p[0] === 'beranda') return vBeranda();
   if (p[0] === 'balita' && !p[1]) return vDaftar();
   if (p[0] === 'balita' && p[1] === 'baru') return vFormBalita(null);
+  if (p[0] === 'impor') return vImpor();
   if (p[0] === 'balita' && p[2] === 'edit') return vFormBalita(p[1]);
   if (p[0] === 'balita') return vDetail(p[1]);
   if (p[0] === 'kunjungan' && p[1] === 'baru') return vFormKunjungan(p[2], null);
@@ -222,7 +223,14 @@ function vBeranda() {
     '<div class="stat"><b>' + dikunjungi + '</b><span>dikunjungi dari ' + S.balita.length + ' balita</span></div>' +
     '<div class="stat"><b>' + cnt.stunting + '</b><span>pendek / sangat pendek</span></div>' +
     '<div class="stat"><b>' + cnt.wasting + '</b><span>gizi kurang / buruk</span></div></div>';
+  var sas = S.balita.filter(IMPOR.isSasaran);
+  if (sas.length) {
+    var sasDone = sas.filter(function (b) { return bulanIni[b.id]; }).length;
+    h += '<a class="panel" href="#/balita" id="lnkSasaran" style="display:flex;gap:12px;align-items:center;text-decoration:none;color:inherit;margin-top:12px"><div style="flex:1"><b>Sasaran kunjungan: ' + sas.length + ' balita</b><div class="small muted">BB/U kurang & sangat kurang (data e-PPGBM). Sudah dikunjungi bulan ini: ' + sasDone + ' (' + Math.round(sasDone / sas.length * 100) + '%)</div>' +
+      '<div style="height:8px;border-radius:4px;background:var(--surface-2);margin-top:8px;overflow:hidden"><div style="height:100%;width:' + Math.round(sasDone / sas.length * 100) + '%;background:var(--brand)"></div></div></div><span class="btn sm">Lihat</span></a>';
+  }
   h += '<div class="row" style="margin-top:14px"><a class="btn primary" style="flex:1" href="#/balita/baru">+ Balita baru</a><a class="btn" style="flex:1" href="#/balita">Cari balita</a></div>';
+  if (!S.balita.length) h += '<div class="row" style="justify-content:center;margin-top:10px"><a class="btn sm" href="#/impor">Impor daftar balita dari e-PPGBM</a></div>';
 
   // Kunjungan terakhir
   var recent = S.kunjungan.slice().sort(function (a, b) { return (b.updatedAt || 0) - (a.updatedAt || 0); }).slice(0, 6);
@@ -254,6 +262,7 @@ function vBeranda() {
   view.innerHTML = '<div class="stack">' + h + '</div>';
   $$('[data-pos]', view).forEach(function (a) { a.addEventListener('click', function () { S.filter = { q: '', desa: desaOf(a.getAttribute('data-pos')), pos: a.getAttribute('data-pos'), belum: false }; saveFilter(); }); });
   var bc = $('#btnContoh'); if (bc) bc.onclick = muatContoh;
+  var ls = $('#lnkSasaran'); if (ls) ls.addEventListener('click', function () { S.filter = { q: '', desa: '', pos: '', belum: true, sasaran: true }; saveFilter(); });
 }
 function latestPerBalita(ym) {
   var m = {};
@@ -270,7 +279,9 @@ function vDaftar() {
   var posOpt = f.desa ? (WILAYAH.filter(function (w) { return w[0] === f.desa; })[0] || [0, []])[1] : [];
   view.innerHTML = '<div class="search"><input class="input" id="q" type="search" placeholder="Cari nama, NIK, atau nama ibu" value="' + esc(f.q) + '" autocomplete="off">' +
     '<div class="grid2">' + selectHtml('fDesa', desaOpt, f.desa, 'Semua desa') + selectHtml('fPos', posOpt, f.pos, 'Semua posyandu') + '</div>' +
+    '<div class="seg" role="radiogroup"><label><input type="radio" name="fSas" value=""' + (f.sasaran ? '' : ' checked') + '>Semua balita</label><label><input type="radio" name="fSas" value="1"' + (f.sasaran ? ' checked' : '') + '>Sasaran kunjungan (BB/U kurang)</label></div>' +
     '<label class="row small muted" style="gap:8px"><input type="checkbox" id="fBelum"' + (f.belum ? ' checked' : '') + '> Hanya yang belum dikunjungi bulan ini</label></div><div id="listWrap"></div>' +
+    '<div class="row" style="justify-content:center;margin:14px 0 0"><a class="btn sm" href="#/impor">Impor dari e-PPGBM</a></div>' +
     '<a class="btn primary fab" href="#/balita/baru">+ Balita baru</a>';
   $$('#fDesa option,#fPos option').forEach(function (o) { if (o.value) o.textContent = title(o.value); });
   function draw() {
@@ -279,26 +290,33 @@ function vDaftar() {
       if (f.desa && b.desa !== f.desa) return false;
       if (f.pos && b.posyandu !== f.pos) return false;
       if (f.belum && bi[b.id]) return false;
-      if (q && (b.nama + ' ' + (b.nik || '') + ' ' + ((b.ibu && b.ibu.nama) || '')).toLowerCase().indexOf(q) < 0) return false;
+      if (f.sasaran && !IMPOR.isSasaran(b)) return false;
+      if (q && (b.nama + ' ' + (b.nik || '') + ' ' + ((b.ibu && b.ibu.nama) || '') + ' ' + ((b.ayah && b.ayah.nama) || '')).toLowerCase().indexOf(q) < 0) return false;
       return true;
     }).sort(function (a, b) { return a.nama.localeCompare(b.nama, 'id'); });
     if (!rows.length) {
       $('#listWrap').innerHTML = '<div class="panel empty"><b>' + (S.balita.length ? 'Tidak ada yang cocok' : 'Belum ada balita') + '</b>' + (S.balita.length ? 'Ubah kata kunci atau filter.' : 'Tambahkan balita baru dengan tombol di bawah.') + '</div>';
       return;
     }
+    var total = rows.length; rows = rows.slice(0, batas);
     $('#listWrap').innerHTML = '<div class="list">' + rows.map(function (b) {
       var k = lastKunjungan(b.id), r = k ? hasil(b, k) : null;
       var umur = GIZI.umurHari(b.tglLahir, today());
       return '<a class="item" href="#/balita/' + b.id + '"><div class="avatar ' + (b.jk === 'P' ? 'p' : '') + '">' + esc(b.nama.charAt(0).toUpperCase()) + '</div><div class="main"><div class="t">' + esc(b.nama) + '</div>' +
         '<div class="s">' + esc(umurTeks(umur)) + ' · ' + esc(title(b.posyandu)) + (k ? ' · terakhir ' + esc(dmy(k.tgl)) : ' · belum ada kunjungan') + '</div>' +
-        (r ? '<div class="chips">' + chip('', r.BBU) + chip('', r.TBU) + chip('', r.BBTB) + '</div>' : '') + '</div>' + (bi[b.id] ? '<span class="done">✓ bulan ini</span>' : '') + '</a>';
-    }).join('') + '</div><p class="small muted" style="text-align:center">' + rows.length + ' balita</p>';
+        (r ? '<div class="chips">' + chip('', r.BBU) + chip('', r.TBU) + chip('', r.BBTB) + '</div>' : (b.eppgbm && b.eppgbm.bbu ? '<div class="chips"><span class="chip">e-PPGBM</span>' + chip('', b.eppgbm.bbu === 'Risiko Lebih' ? 'Risiko BB Lebih' : b.eppgbm.bbu) + '</div>' : '')) + '</div>' +
+        (bi[b.id] ? '<span class="done">✓ bulan ini</span>' : (IMPOR.isSasaran(b) ? '<span class="chip warn">sasaran</span>' : '')) + '</a>';
+    }).join('') + '</div><p class="small muted" style="text-align:center">' + (total > rows.length ? 'Menampilkan ' + rows.length + ' dari ' + total + ' balita. Gunakan pencarian atau filter, atau <button class="btn sm" type="button" id="btnMore">tampilkan lebih banyak</button>' : total + ' balita') + '</p>';
+    var bm = $('#btnMore'); if (bm) bm.onclick = function () { batas += 150; draw(); };
   }
+  var batas = 150;
   draw();
   $('#q').addEventListener('input', function (e) { f.q = e.target.value; draw(); });
   $('#fDesa').addEventListener('change', function (e) { f.desa = e.target.value; f.pos = ''; saveFilter(); vDaftar(); });
   $('#fPos').addEventListener('change', function (e) { f.pos = e.target.value; saveFilter(); draw(); });
   $('#fBelum').addEventListener('change', function (e) { f.belum = e.target.checked; saveFilter(); draw(); });
+  $$('input[name=fSas]').forEach(function (r) { r.addEventListener('change', function () { f.sasaran = r.value === '1'; saveFilter(); batas = 150; draw(); }); });
+  var tq; $('#q').addEventListener('input', function () { batas = 150; });
 }
 
 /* ================= Form balita (data induk) ================= */
@@ -355,13 +373,14 @@ function vFormBalita(id) {
     var errs = [], warns = [];
     $$('.input.err', fm).forEach(function (x) { x.classList.remove('err'); });
     function bad(idf, msg) { errs.push(msg); var el = $('#' + idf); if (el) el.classList.add('err'); }
-    var o = {
+    var o = Object.assign({}, b, {
       id: b.id || uid(), nama: g('nama'), nik: g('nik'), jk: g('jk'), tglLahir: g('tglLahir'), anakKe: g('anakKe'),
       desa: g('desa'), posyandu: g('posyandu'), alamat: g('alamat'), uk: num(g('uk')), kategoriLahir: g('kategoriLahir'),
       bbl: num(g('bbl')), pbl: num(g('pbl')), lkl: num(g('lkl')),
-      ayah: ortuRead(fd, 'ayah'), ibu: ortuRead(fd, 'ibu'),
+      ayah: ortuRead(fd, 'ayah'), ibu: ortuRead(fd, 'ibu'), ortuCek: false,
       createdAt: b.createdAt || Date.now(), updatedAt: Date.now()
-    };
+    });
+    delete o._dirty;
     if (!o.nama) bad('nama', 'Nama balita wajib diisi.');
     if (!o.jk) errs.push('Pilih jenis kelamin.');
     if (!o.tglLahir) bad('tglLahir', 'Tanggal lahir wajib diisi.');
@@ -415,6 +434,8 @@ function vDetail(id) {
     '<div class="row" style="margin-top:12px"><a class="btn primary" style="flex:1" href="#/kunjungan/baru/' + id + '">' + (bi ? 'Tambah kunjungan lagi' : '+ Kunjungan ' + esc(BULAN[new Date().getMonth()])) + '</a></div>' +
     (bi ? '<p class="small" style="margin:8px 0 0;color:var(--ok)">✓ Sudah dikunjungi bulan ini (' + esc(dmy(bi.tgl)) + ')</p>' : '') + '</div>';
 
+  if (b.eppgbm) h += '<h2>Data posyandu (e-PPGBM)</h2>' + eppgbmPanel(b.eppgbm, IMPOR.isSasaran(b));
+  if (b.ortuCek && b.ortuAsli) h += '<div class="warnbox" style="margin-top:12px">Nama orang tua dari e-PPGBM: <b>' + esc(b.ortuAsli) + '</b>. Tercatat Ayah: ' + esc(b.ayah.nama || '–') + ', Ibu: ' + esc(b.ibu.nama || '–') + '. Periksa apakah sudah benar, lalu lengkapi lewat <a href="#/balita/' + id + '/edit">Ubah data induk</a>.</div>';
   if (ks.length > 1) h += '<h2>Tren z-score</h2><div class="panel">' + trendSvg(b, ks.slice().reverse()) + '</div>';
 
   h += '<h2>Riwayat kunjungan (' + ks.length + ')</h2>';
@@ -469,6 +490,15 @@ function trendSvg(b, ks) {
   return s;
 }
 
+function eppgbmPanel(e, sasaran) {
+  var z = function (v) { return v == null ? '' : ' (' + (v > 0 ? '+' : '') + String(v).replace('.', ',') + ')'; };
+  var naik = { N: 'Naik', T: 'Tidak naik', O: 'Tidak ditimbang bulan lalu', B: 'Baru' }[e.naik] || e.naik || '–';
+  return '<div class="panel small stack" style="gap:6px"><div class="row" style="gap:6px"><b>Penimbangan ' + esc(dmy(e.tgl)) + '</b>' + (sasaran ? '<span class="chip warn">sasaran kunjungan</span>' : '') + '</div>' +
+    '<div class="num">BB ' + fmtNum(e.bb) + ' kg · ' + (/terlentang/i.test(e.cara || '') ? 'PB ' : 'TB ') + fmtNum(e.tb) + ' cm' + (e.lila ? ' · LiLA ' + fmtNum(e.lila) + ' cm' : '') + ' · Naik BB: ' + esc(naik) + '</div>' +
+    '<div class="row" style="gap:4px">' + chip('BB/U', (e.bbu === 'Risiko Lebih' ? 'Risiko BB Lebih' : e.bbu) + z(e.zbbu)) + chip('TB/U', e.tbu + z(e.ztbu)) + chip('BB/TB', e.bbtb + z(e.zbbtb)) + '</div>' +
+    '<div class="muted" style="font-size:12px">Sumber: e-PPGBM' + (e.unduh ? ' (diunduh ' + esc(dmy(e.unduh)) + ')' : '') + '. Bukan kunjungan lapangan; hanya sebagai pembanding.</div></div>';
+}
+
 /* ================= Form kunjungan ================= */
 function vFormKunjungan(balitaId, kid) {
   var k = kid ? kunjunganById(kid) : null;
@@ -491,6 +521,7 @@ function vFormKunjungan(balitaId, kid) {
     '<div class="panel small"><b>' + esc(b.nama) + '</b> · ' + (b.jk === 'L' ? 'Laki-laki' : 'Perempuan') + ' · lahir ' + esc(dmy(b.tglLahir)) + '<br><span class="muted">' + esc(title(b.posyandu)) + ', ' + esc(title(b.desa)) + (b.ibu.nama ? ' · Ibu ' + esc(b.ibu.nama) : '') + '</span></div>' +
 
     '<div class="sect"><p class="sect-h"><b>Pemeriksaan</b>' + (prev ? '<span class="hint">kunjungan lalu ' + esc(dmy(prev.tgl)) + ': BB ' + fmtNum(prev.bb) + ' kg, ' + (prev.caraUkur === 'terlentang' ? 'PB ' : 'TB ') + fmtNum(prev.tb) + ' cm</span>' : '') + '</p>' +
+    (b.eppgbm && b.eppgbm.bb != null ? '<div class="warnbox info small">Posyandu (e-PPGBM) ' + esc(dmy(b.eppgbm.tgl)) + ': BB ' + fmtNum(b.eppgbm.bb) + ' kg, ' + (/terlentang/i.test(b.eppgbm.cara || '') ? 'PB ' : 'TB ') + fmtNum(b.eppgbm.tb) + ' cm · BB/U ' + esc(b.eppgbm.bbu || '–') + ', TB/U ' + esc(b.eppgbm.tbu || '–') + ', BB/TB ' + esc(b.eppgbm.bbtb || '–') + '</div>' : '') +
     field('Tanggal kunjungan', inp('tgl', k.tgl, { type: 'date', max: today() }), { req: 1, forId: 'tgl', id: 'tgl' }) +
     '<div class="grid2">' + field('Berat badan', inp('bb', fmtNum(k.bb), { mode: 'decimal', unit: 'kg', ph: '9,5' }), { req: 1, forId: 'bb', id: 'bb' }) +
     field('Panjang / tinggi', inp('tb', fmtNum(k.tb), { mode: 'decimal', unit: 'cm', ph: '78,5' }), { req: 1, forId: 'tb', id: 'tb' }) + '</div>' +
@@ -546,7 +577,12 @@ function vFormKunjungan(balitaId, kid) {
     var r = GIZI.hitung({ jk: b.jk, tglLahir: b.tglLahir, tglUkur: d.tgl, bb: d.bb, tb: d.tb, caraUkur: d.caraUkur });
     var pv = lastKunjungan(b.id, d.tgl, k.id);
     var notes = r.pesan.slice(), info = [];
-    if (pv && pv.tgl < d.tgl) {
+    var ep = b.eppgbm;
+    if (ep && ep.bb != null && d.bb != null && ep.tgl < d.tgl && (!pv || ep.tgl > pv.tgl)) {
+      var de = Math.round((d.bb - ep.bb) * 100) / 100;
+      if (de <= 0) notes.push('BB tidak naik dibanding penimbangan posyandu ' + dmy(ep.tgl) + ' (' + fmtNum(ep.bb) + ' → ' + fmtNum(d.bb) + ' kg).'); else info.push('BB naik ' + fmtNum(de) + ' kg dari penimbangan posyandu ' + dmy(ep.tgl) + '.');
+    }
+    if (pv && pv.tgl < d.tgl && !(ep && ep.tgl > pv.tgl && ep.tgl < d.tgl)) {
       if (d.bb != null && pv.bb != null) { var db = Math.round((d.bb - pv.bb) * 100) / 100; if (db <= 0) notes.push('BB tidak naik dibanding ' + dmy(pv.tgl) + ' (' + fmtNum(pv.bb) + ' → ' + fmtNum(d.bb) + ' kg).'); else info.push('BB naik ' + fmtNum(db) + ' kg dari ' + dmy(pv.tgl) + '.'); }
       if (d.tb != null && pv.tb != null && d.tb < pv.tb - 0.5) notes.push('Panjang/tinggi lebih kecil dari kunjungan lalu (' + fmtNum(pv.tb) + ' cm). Cek ulang pengukuran.');
     }
@@ -673,6 +709,56 @@ function downloadBlob(blob, name) {
   toast('Tersimpan: ' + name, 3500);
 }
 
+
+
+/* ================= Impor dari e-PPGBM ================= */
+function vImpor() {
+  setNav('balita'); setTitle('Impor dari e-PPGBM', 'Daftar balita dari file Excel', '#/balita');
+  view.innerHTML = '<div class="stack"><div class="panel stack"><p style="margin:0">Pilih file Excel hasil ekspor <b>daftar hasil pengukuran balita</b> dari e-PPGBM (.xlsx). Semua balita akan masuk sebagai data induk, sehingga saat kunjungan petugas cukup mencari nama.</p>' +
+    '<ul class="small muted" style="margin:0;padding-left:18px"><li>Balita yang sudah ada (NIK sama, atau nama + tanggal lahir sama) tidak dibuat ganda; hanya data kosong yang dilengkapi dan data posyandu diperbarui.</li><li>Balita dengan <b>BB/U kurang atau sangat kurang</b> otomatis ditandai sebagai <b>sasaran kunjungan</b>.</li><li>File dibaca di perangkat ini saja, tidak dikirim ke mana pun.</li></ul>' +
+    '<label class="btn primary" for="fileEp">Pilih file Excel e-PPGBM</label><input type="file" id="fileEp" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden></div><div id="impHasil"></div></div>';
+  $('#fileEp').onchange = function (e) {
+    var file = e.target.files[0]; if (!file) return;
+    $('#impHasil').innerHTML = '<div class="panel">Membaca ' + esc(file.name) + '…</div>';
+    loadLibs().then(function () { return IMPOR.baca(file); }).then(function (hb) {
+      var cc = IMPOR.cocokkan(hb), pilih = {};
+      var per = {};
+      hb.baris.forEach(function (x) { var k = x.posyandu; per[k] = per[k] || { n: 0, baru: 0, sas: 0 }; per[k].n++; if (IMPOR.isSasaran(x)) per[k].sas++; });
+      cc.baru.forEach(function (x) { per[x.posyandu].baru++; });
+      Object.keys(per).forEach(function (k) { pilih[k] = true; });
+      function hitungPilih() { var n = 0, baru = 0, sas = 0; Object.keys(per).forEach(function (k) { if (pilih[k]) { n += per[k].n; baru += per[k].baru; sas += per[k].sas; } }); return { n: n, baru: baru, sas: sas }; }
+      function render() {
+        var t = hitungPilih();
+        var h = '<div class="panel stack" style="gap:8px"><b>' + esc(hb.nama) + '</b><div class="small muted">' + (hb.tglData ? 'Data e-PPGBM tanggal ' + esc(dmy(hb.tglData)) + ' · ' : '') + hb.baris.length + ' balita terbaca' + (hb.gagal.length ? ', ' + hb.gagal.length + ' baris dilewati' : '') + '</div>' +
+          '<div class="stats"><div class="stat"><b>' + t.baru + '</b><span>balita baru</span></div><div class="stat"><b>' + (t.n - t.baru) + '</b><span>sudah ada (diperbarui)</span></div><div class="stat"><b>' + t.sas + '</b><span>sasaran BB/U kurang</span></div></div></div>';
+        h += '<h2>Pilih wilayah yang diimpor</h2><div class="list">';
+        WILAYAH.forEach(function (w) {
+          w[1].forEach(function (p) {
+            if (!per[p]) return;
+            h += '<label class="pos" style="cursor:pointer"><input type="checkbox" data-p="' + esc(p) + '"' + (pilih[p] ? ' checked' : '') + '><span class="n">' + esc(title(p)) + ' <span class="muted small">· ' + esc(title(w[0])) + '</span></span><span class="small muted num">' + per[p].n + ' balita · ' + per[p].sas + ' sasaran</span></label>';
+          });
+        });
+        h += '</div>';
+        if (hb.gagal.length) h += '<details class="panel" style="margin-top:12px"><summary>' + hb.gagal.length + ' baris dilewati</summary><ul class="small" style="margin:0;padding-left:18px">' + hb.gagal.slice(0, 50).map(function (g) { return '<li>Baris ' + g.no + ' ' + esc(g.nama) + ': ' + esc(g.alasan) + '</li>'; }).join('') + '</ul></details>';
+        h += '<div class="savebar"><button class="btn primary" id="btnImpor" type="button"' + (t.n ? '' : ' disabled') + '>Impor ' + t.n + ' balita</button></div>';
+        $('#impHasil').innerHTML = h;
+        $$('[data-p]', view).forEach(function (c) { c.onchange = function () { pilih[c.getAttribute('data-p')] = c.checked; render(); }; });
+        $('#btnImpor').onclick = function () {
+          var bt = $('#btnImpor'); bt.disabled = true; bt.textContent = 'Mengimpor…';
+          IMPOR.simpan(cc, pilih).then(function (n) {
+            toast(n + ' balita diimpor/diperbarui', 3500);
+            S.filter = { q: '', desa: '', pos: '', belum: false, sasaran: true }; saveFilter();
+            location.hash = '#/balita';
+          }).catch(function (err) { toast('Gagal mengimpor: ' + err.message, 4500); bt.disabled = false; bt.textContent = 'Impor'; });
+        };
+      }
+      render();
+    }).catch(function (err) {
+      $('#impHasil').innerHTML = '<div class="warnbox bad">' + esc(err.message) + '</div>';
+    });
+    e.target.value = '';
+  };
+}
 
 /* ================= Laporan bulanan (Word) ================= */
 var docxLoaded = null;
